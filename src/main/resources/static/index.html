@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Medallion — Stock Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f5f5f5;
+    --surface: #ffffff;
+    --surface2: #f9f9f9;
+    --border: #e2e2e2;
+    --border2: #d0d0d0;
+    --text: #1a1a1a;
+    --muted: #6b6b6b;
+    --accent: #1a56db;
+    --accent-dim: rgba(26,86,219,0.07);
+    --bull: #16a34a;
+    --bull-dim: rgba(22,163,74,0.08);
+    --bear: #dc2626;
+    --bear-dim: rgba(220,38,38,0.08);
+    --font: 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+    --radius: 6px;
+    --radius-lg: 8px;
+  }
+  html, body { min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+
+  /* SEARCH PAGE */
+  #search-page {
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem;
+  }
+  .wordmark {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); margin-bottom: 2.5rem;
+  }
+  .hero-title {
+    font-size: clamp(2rem, 5vw, 3rem); font-weight: 600; line-height: 1.15; text-align: center; margin-bottom: 0.4rem; color: var(--text); letter-spacing: -0.01em;
+  }
+  .hero-sub { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 3rem; }
+  .search-form { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 12px; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .field input, .field select {
+    background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius);
+    padding: 10px 14px; font-family: var(--font); font-size: 14px; color: var(--text); outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s; appearance: none; width: 100%;
+  }
+  .field select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b6b6b' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center; padding-right: 34px; cursor: pointer;
+  }
+  .field input::placeholder { color: #b0b0b0; }
+  .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(26,86,219,0.1); }
+  .field select option { background: #fff; color: var(--text); }
+  .search-btn {
+    margin-top: 6px; padding: 11px; background: var(--accent); color: #fff; border: none;
+    border-radius: var(--radius); font-family: var(--font); font-size: 14px; font-weight: 500;
+    cursor: pointer; transition: background 0.15s, transform 0.1s; display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .search-btn:hover { background: #1447c0; }
+  .search-btn:active { transform: scale(0.99); }
+  .search-btn:disabled { background: #a0aec0; cursor: not-allowed; transform: none; }
+  .spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-msg { background: var(--bear-dim); border: 1px solid rgba(220,38,38,0.2); border-radius: var(--radius); padding: 10px 14px; font-size: 13px; color: var(--bear); display: none; }
+
+  /* DASHBOARD PAGE */
+  #dashboard-page { display: none; min-height: 100vh; padding: 2rem; max-width: 1060px; margin: 0 auto; }
+  .dash-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; }
+  .dash-stock-name { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+  .dash-meta { font-size: 12px; color: var(--muted); margin-top: 3px; font-family: var(--font-mono); }
+  .back-btn { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius); padding: 7px 14px; font-family: var(--font); font-size: 12px; color: var(--muted); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+  .back-btn:hover { color: var(--text); border-color: #aaa; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 1.25rem; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; }
+  .kpi-label { font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .kpi-value { font-size: 20px; font-weight: 600; font-family: var(--font-mono); color: var(--text); }
+  .kpi-hint { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .kpi-value.bull { color: var(--bull); }
+  .kpi-value.bear { color: var(--bear); }
+  .kpi-value.accent { color: var(--accent); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+  .card-title { font-size: 11px; font-weight: 500; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); margin-bottom: 1rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; }
+  .leg-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .leg-dot { width: 10px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  @media (max-width: 580px) { .two-col { grid-template-columns: 1fr; } }
+
+  .prob-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .prob-label { font-size: 13px; color: var(--text); }
+  .prob-val { font-size: 16px; font-weight: 600; font-family: var(--font-mono); }
+  .prob-val.bull { color: var(--bull); }
+  .prob-val.bear { color: var(--bear); }
+  .prob-track { height: 5px; border-radius: 3px; background: var(--surface2); border: 1px solid var(--border); overflow: hidden; margin-bottom: 12px; }
+  .prob-fill { height: 100%; border-radius: 3px; transition: width 0.9s cubic-bezier(0.16,1,0.3,1); }
+  .prob-fill.bull { background: var(--bull); }
+  .prob-fill.bear { background: var(--bear); }
+
+  .sim-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .sim-stat { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; text-align: center; }
+  .sim-stat-label { font-size: 10px; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sim-stat-val { font-size: 18px; font-weight: 600; font-family: var(--font-mono); }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+
+<!-- SEARCH PAGE -->
+<div id="search-page">
+  <div class="wordmark">Medallion</div>
+  <h1 class="hero-title">Stock Analysis</h1>
+  <p class="hero-sub">Monte Carlo simulations &amp; price forecasting</p>
+
+  <form class="search-form" id="search-form" onsubmit="return false;">
+    <div class="field">
+      <label>Stock name</label>
+      <input type="text" id="inp-stock" placeholder="e.g. Tata Steel, Infosys, Reliance" required autocomplete="off" />
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Period</label>
+        <select id="inp-period">
+          <option value="1m">1 Month</option>
+          <option value="3m">3 Months</option>
+          <option value="6m" selected>6 Months</option>
+          <option value="1y">1 Year</option>
+          <option value="2y">2 Years</option>
+          <option value="5y">5 Years</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Simulation days</label>
+        <input type="number" id="inp-days" value="30" min="1" max="365" placeholder="30" />
+      </div>
+	  <div class="field">
+	          <label>Simulation Count</label>
+	          <select id="inp-simulation_count">
+	            <option value="10">10</option>
+	            <option value="100">100</option>
+	            <option value="500" selected>500</option>
+	            <option value="1000">1000</option>
+	            <option value="10000">10000</option>
+	            <option value="100000">100000</option>
+	          </select>
+	        </div>
+    </div>
+    <div class="error-msg" id="error-msg"></div>
+    <button class="search-btn" id="search-btn" type="submit">
+      <span class="spinner" id="btn-spinner"></span>
+      <span id="btn-text">Analyse</span>
+    </button>
+  </form>
+</div>
+
+<!-- DASHBOARD PAGE -->
+<div id="dashboard-page">
+  <div class="dash-header">
+    <div>
+      <div class="dash-stock-name" id="d-stock-name">—</div>
+      <div class="dash-meta" id="d-meta">—</div>
+    </div>
+    <button class="back-btn" onclick="showSearch()">← New search</button>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Current price</div>
+      <div class="kpi-value accent" id="d-price">—</div>
+      <div class="kpi-hint">Last close</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">1-day sim avg</div>
+      <div class="kpi-value" id="d-sim-avg">—</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">DMA 50</div>
+      <div class="kpi-value" id="d-dma50">—</div>
+      <div class="kpi-hint" id="d-dma50-hint">—</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">DMA 200</div>
+      <div class="kpi-value" id="d-dma200">—</div>
+      <div class="kpi-hint" id="d-dma200-hint">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Price history with moving averages</div>
+    <div class="legend">
+      <span class="leg-item"><span class="leg-dot" style="background:#1a56db;"></span>Price</span>
+      <span class="leg-item"><span class="leg-dot" style="background:#d97706;"></span>DMA 50</span>
+      <span class="leg-item"><span class="leg-dot" style="background:#dc2626;"></span>DMA 200</span>
+    </div>
+    <div style="position:relative;width:100%;height:240px;">
+      <canvas id="priceChart"></canvas>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div class="card" style="margin-bottom:0;">
+      <div class="card-title">1-day probability</div>
+      <div class="prob-row">
+        <span class="prob-label">Bullish</span>
+        <span class="prob-val bull" id="d-bull-pct">—</span>
+      </div>
+      <div class="prob-track"><div class="prob-fill bull" id="d-bull-bar" style="width:0%;"></div></div>
+      <div class="prob-row">
+        <span class="prob-label">Bearish</span>
+        <span class="prob-val bear" id="d-bear-pct">—</span>
+      </div>
+      <div class="prob-track"><div class="prob-fill bear" id="d-bear-bar" style="width:0%;"></div></div>
+      <hr class="divider">
+      <div style="font-size:11px;color:var(--muted);" id="d-updown">—</div>
+    </div>
+
+    <div class="card" style="margin-bottom:0;">
+      <div class="card-title">30-day simulation outcomes</div>
+      <div class="sim-stats">
+        <div class="sim-stat">
+          <div class="sim-stat-label">Bullish paths</div>
+          <div class="sim-stat-val" style="color:var(--bull);" id="d-bull-count">—</div>
+        </div>
+        <div class="sim-stat">
+          <div class="sim-stat-label">Bearish paths</div>
+          <div class="sim-stat-val" style="color:var(--bear);" id="d-bear-count">—</div>
+        </div>
+      </div>
+      <hr class="divider">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Final price range</div>
+      <div style="display:flex;justify-content:space-between;">
+        <span style="font-size:13px;color:var(--bear);font-family:var(--font-mono);" id="d-range-low">—</span>
+        <span style="font-size:13px;color:var(--bull);font-family:var(--font-mono);" id="d-range-high">—</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;" id="d-median">—</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1rem;">
+    <div class="card-title">Monte Carlo simulation paths</div>
+    <div class="legend">
+      <span class="leg-item"><span class="leg-dot" style="background:#16a34a;"></span>Bullish paths</span>
+      <span class="leg-item"><span class="leg-dot" style="background:#dc2626;"></span>Bearish paths</span>
+    </div>
+    <div style="position:relative;width:100%;height:220px;">
+      <canvas id="simChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Daily volume (NSE)</div>
+    <div style="position:relative;width:100%;height:150px;">
+      <canvas id="volChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+let priceChartInst = null, simChartInst = null, volChartInst = null;
+
+document.getElementById('search-form').addEventListener('submit', runSearch);
+document.getElementById('inp-stock').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+
+async function runSearch() {
+  const stock = document.getElementById('inp-stock').value.trim();
+  const period = document.getElementById('inp-period').value;
+  const days = parseInt(document.getElementById('inp-days').value) || 30;
+  const count = parseInt(document.getElementById('inp-simulation_count').value) || 10;
+
+
+  if (!stock) { showError('Please enter a stock name.'); return; }
+  setLoading(true);
+  hideError();
+
+  try {
+    const resp = await fetch('http://localhost:8080/medallion/getMedallion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ stock, period, days,count })
+    });
+    if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+    const data = await resp.json();
+    renderDashboard(data, stock, period, days);
+  } catch (err) {
+    showError('Could not reach the API. Make sure localhost:8080 is running. (' + err.message + ')');
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderDashboard(data, stock, period, days) {
+  const prices = data.dataSetDto?.price?.values ?? [];
+  const volumes = data.dataSetDto?.volumeData?.values ?? [];
+  const dma50vals = data.dataSetDto?.dma50?.values ?? [];
+  const dma200vals = data.dataSetDto?.dma200?.values ?? [];
+  const oneday = data.oneday ?? {};
+  const sims = data.multidays ?? [];
+
+  const lastPrice = prices.length ? prices[prices.length - 1].value : 0;
+  const lastDma50 = dma50vals.length ? dma50vals[dma50vals.length - 1].value : 0;
+  const lastDma200 = dma200vals.length ? dma200vals[dma200vals.length - 1].value : 0;
+  const bullCount = sims.filter(s => s.bullish).length;
+  const bearCount = sims.length - bullCount;
+  const finals = sims.map(s => s.finalPrice);
+  const minFinal = Math.min(...finals);
+  const maxFinal = Math.max(...finals);
+  const medFinal = [...finals].sort((a, b) => a - b)[Math.floor(finals.length / 2)];
+
+  document.getElementById('d-stock-name').textContent = stock;
+  document.getElementById('d-meta').textContent = `Period: ${period} · Simulation: ${days} days · Data points: ${prices.length}`;
+  document.getElementById('d-price').textContent = '₹' + lastPrice.toFixed(2);
+  document.getElementById('d-sim-avg').textContent = '₹' + (oneday.averagePrice ?? 0).toFixed(2);
+  document.getElementById('d-dma50').textContent = '₹' + lastDma50.toFixed(2);
+  document.getElementById('d-dma50-hint').textContent = lastPrice > lastDma50 ? 'Price above ↑' : 'Price below ↓';
+  document.getElementById('d-dma50').className = 'kpi-value ' + (lastPrice > lastDma50 ? 'bull' : 'bear');
+  document.getElementById('d-dma200').textContent = '₹' + lastDma200.toFixed(2);
+  document.getElementById('d-dma200-hint').textContent = lastPrice > lastDma200 ? 'Price above ↑' : 'Price below ↓';
+  document.getElementById('d-dma200').className = 'kpi-value ' + (lastPrice > lastDma200 ? 'bull' : 'bear');
+
+  const bullPct = Math.round((oneday.bullishProbability ?? 0) * 100);
+  const bearPct = Math.round((oneday.bearishProbability ?? 0) * 100);
+  document.getElementById('d-bull-pct').textContent = bullPct + '%';
+  document.getElementById('d-bear-pct').textContent = bearPct + '%';
+  setTimeout(() => {
+    document.getElementById('d-bull-bar').style.width = bullPct + '%';
+    document.getElementById('d-bear-bar').style.width = bearPct + '%';
+  }, 100);
+  document.getElementById('d-updown').textContent =
+    `Expected upside: +${((oneday.expectedUpsidePercent ?? 0) * 100).toFixed(2)}%  ·  Downside: −${((oneday.expectedDownsidePercent ?? 0) * 100).toFixed(2)}%`;
+
+  document.getElementById('d-bull-count').textContent = bullCount;
+  document.getElementById('d-bear-count').textContent = bearCount;
+  document.getElementById('d-range-low').textContent = 'Low ₹' + minFinal.toFixed(2);
+  document.getElementById('d-range-high').textContent = 'High ₹' + maxFinal.toFixed(2);
+  document.getElementById('d-median').textContent = 'Median final: ₹' + medFinal.toFixed(2);
+
+  const tooltipDefaults = {
+    mode: 'index', intersect: false,
+    backgroundColor: '#fff', titleColor: '#1a1a1a', bodyColor: '#6b6b6b',
+    borderColor: '#e2e2e2', borderWidth: 1
+  };
+  const xAxis = { ticks: { autoSkip: true, maxTicksLimit: 10, font: { size: 11, family: 'IBM Plex Mono' }, color: '#9a9a9a' }, grid: { display: false } };
+  const yAxis = { ticks: { font: { size: 11, family: 'IBM Plex Mono' }, color: '#9a9a9a' }, grid: { color: 'rgba(0,0,0,0.05)' } };
+
+  const pLabels = prices.map(p => p.date);
+  const pData = prices.map(p => p.value);
+  const d50Data = dma50vals.map(v => v.value);
+  const d200Data = dma200vals.map(v => v.value);
+
+  if (priceChartInst) priceChartInst.destroy();
+  priceChartInst = new Chart(document.getElementById('priceChart'), {
+    type: 'line',
+    data: {
+      labels: pLabels,
+      datasets: [
+        { label: 'Price', data: pData, borderColor: '#1a56db', backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.3 },
+        { label: 'DMA 50', data: d50Data, borderColor: '#d97706', backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, borderDash: [4, 3], tension: 0.3 },
+        { label: 'DMA 200', data: d200Data, borderColor: '#dc2626', backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, borderDash: [6, 3], tension: 0.3 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: tooltipDefaults },
+      scales: { x: xAxis, y: { ...yAxis, ticks: { ...yAxis.ticks, callback: v => '₹' + v } } }
+    }
+  });
+
+  const simLabels = Array.from({ length: sims[0]?.prices?.length || 30 }, (_, i) => 'D' + (i + 1));
+  const simDatasets = sims.map(s => ({
+    label: s.bullish ? 'Bullish' : 'Bearish',
+    data: s.prices,
+    borderColor: s.bullish ? 'rgba(22,163,74,0.6)' : 'rgba(220,38,38,0.5)',
+    backgroundColor: 'transparent',
+    borderWidth: s.bullish ? 1 : 1.2,
+    pointRadius: 0,
+    tension: 0.3,
+    borderDash: s.bullish ? [] : [4, 3]
+  }));
+
+  if (simChartInst) simChartInst.destroy();
+  simChartInst = new Chart(document.getElementById('simChart'), {
+    type: 'line',
+    data: { labels: simLabels, datasets: simDatasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: tooltipDefaults },
+      scales: { x: xAxis, y: { ...yAxis, ticks: { ...yAxis.ticks, callback: v => '₹' + v.toFixed(0) } } }
+    }
+  });
+
+  const vLabels = volumes.map(v => v.date);
+  const vData = volumes.map(v => v.volume / 1e6);
+
+  if (volChartInst) volChartInst.destroy();
+  volChartInst = new Chart(document.getElementById('volChart'), {
+    type: 'bar',
+    data: {
+      labels: vLabels,
+      datasets: [{ label: 'Volume', data: vData, backgroundColor: 'rgba(26,86,219,0.15)', borderColor: 'rgba(26,86,219,0.4)', borderWidth: 1 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults, callbacks: { label: ctx => ctx.raw.toFixed(1) + 'M shares' } } },
+      scales: { x: xAxis, y: { ...yAxis, ticks: { ...yAxis.ticks, callback: v => v + 'M' } } }
+    }
+  });
+
+  document.getElementById('search-page').style.display = 'none';
+  document.getElementById('dashboard-page').style.display = 'block';
+  window.scrollTo(0, 0);
+}
+
+function showSearch() {
+  document.getElementById('dashboard-page').style.display = 'none';
+  document.getElementById('search-page').style.display = 'flex';
+}
+
+function setLoading(on) {
+  document.getElementById('search-btn').disabled = on;
+  document.getElementById('btn-spinner').style.display = on ? 'block' : 'none';
+  document.getElementById('btn-text').textContent = on ? 'Fetching data...' : 'Analyse';
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideError() {
+  document.getElementById('error-msg').style.display = 'none';
+}
+</script>
+</body>
+</html>
