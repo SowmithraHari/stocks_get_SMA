@@ -1,7 +1,5 @@
 package com.medallion.Medallion.dto;
 
-import java.util.List;
-
 public class StockDto {
 
 	private String companyName;
@@ -15,7 +13,7 @@ public class StockDto {
 	private Double yearHigh;
 	private Double yearLow;
 
-	private List<FinancialsDto> financials;
+	private FinancialsDto financials;
 	private KeyMetricsDto keyMetrics;
 
 	private String futureExpiryDates;
@@ -31,7 +29,7 @@ public class StockDto {
 	private StockDetailsReusableDataDto stockDetailsReusableData;
 	private StockFinancialDataDto stockFinancialData;
 
-	private List<RecentNewsDto> recentNews;
+	private RecentNewsResponseDto recentNews;
 
 	public String getCompanyName() {
 		return companyName;
@@ -97,11 +95,12 @@ public class StockDto {
 		this.yearLow = yearLow;
 	}
 
-	public List<FinancialsDto> getFinancials() {
+
+	public FinancialsDto getFinancials() {
 		return financials;
 	}
 
-	public void setFinancials(List<FinancialsDto> financials) {
+	public void setFinancials(FinancialsDto financials) {
 		this.financials = financials;
 	}
 
@@ -193,13 +192,15 @@ public class StockDto {
 		this.stockFinancialData = stockFinancialData;
 	}
 
-	public List<RecentNewsDto> getRecentNews() {
+	public RecentNewsResponseDto getRecentNews() {
 		return recentNews;
 	}
 
-	public void setRecentNews(List<RecentNewsDto> recentNews) {
+	public void setRecentNews(RecentNewsResponseDto recentNews) {
 		this.recentNews = recentNews;
-	}	
+	}
+
+	
 	
 
 }

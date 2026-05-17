@@ -10,7 +10,7 @@ public class StockTechnicalDataDto {
 		return days;
 	}
 
-	public void setDays(Integer days) {
+	public void setDays(Integer days) { 
 		this.days = days;
 	}
 

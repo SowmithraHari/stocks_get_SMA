@@ -2,7 +2,7 @@ package com.medallion.Medallion.dto;
 
 public class PeerCompanyDto {
 
-	private String tickerId;
+	
 	private String companyName;
 	private Double priceToBookValueRatio;
 	private Double priceToEarningsValueRatio;
@@ -22,12 +22,7 @@ public class PeerCompanyDto {
 	private String overallRating;
 	private Double yhigh;
 	private Double ylow;
-	public String getTickerId() {
-		return tickerId;
-	}
-	public void setTickerId(String tickerId) {
-		this.tickerId = tickerId;
-	}
+	
 	public String getCompanyName() {
 		return companyName;
 	}

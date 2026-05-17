@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.medallion.Medallion.dematservice.MedallionService;
 import com.medallion.Medallion.dto.DirectionalProbabilityDto;
+import com.medallion.Medallion.dto.StockDto;
 import com.medallion.Medallion.dto.StockRequest;
 
 @RestController
@@ -19,13 +20,17 @@ public class MedallionController {
 	private MedallionService medallionService;
 
 	@PostMapping("/getMedallion")
-	public ResponseEntity<DirectionalProbabilityDto> getMedallion(
-	        @RequestBody StockRequest stockRequest) {
+	public ResponseEntity<DirectionalProbabilityDto> getMedallion(@RequestBody StockRequest stockRequest) {
 
-	    DirectionalProbabilityDto result =
-	            medallionService.getDirectionalProbability(stockRequest);
+		DirectionalProbabilityDto result = medallionService.getDirectionalProbability(stockRequest);
 
-	    return ResponseEntity.ok(result);
+		return ResponseEntity.ok(result);
+	}
+
+	@PostMapping("/getStock")
+	public ResponseEntity<StockDto> getStockDetails(@RequestBody StockRequest stockRequest) {
+		StockDto result = medallionService.getStockDetails(stockRequest);
+		return ResponseEntity.ok(result);
 	}
 
 }

@@ -2,16 +2,26 @@ package com.medallion.Medallion.dto;
 
 public class OfficerDto {
 
-    private Integer rank;
-    private String since;
+	private Integer rank;
+	private String since;
 
-    private String firstName;
-    private String middleName;
-    private String lastName;
+	private String firstName;
+	private String middleName;
+	private String lastName;
 
-    private Integer age;
+	private Integer age;
+	private String mI;
 
-    private TitleDto title;
+	
+	public String getmI() {
+		return mI;
+	}
+
+	public void setmI(String mI) {
+		this.mI = mI;
+	}
+
+	private TitleDto title;
 
 	public Integer getRank() {
 		return rank;

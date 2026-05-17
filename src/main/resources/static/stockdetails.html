@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Dashboard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f3; color: #1a1a18; min-height: 100vh; padding: 2rem 1rem; }
+  .container { max-width: 900px; margin: 0 auto; }
+  .search-bar { display: flex; gap: 10px; margin-bottom: 2rem; }
+  .search-bar input { flex: 1; padding: 10px 14px; font-size: 15px; border: 0.5px solid rgba(0,0,0,0.2); border-radius: 8px; background: #fff; outline: none; font-family: inherit; }
+  .search-bar input:focus { border-color: #185fa5; box-shadow: 0 0 0 3px rgba(24,95,165,0.1); }
+  .search-bar button { padding: 10px 20px; font-size: 14px; font-weight: 500; background: #1a1a18; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-family: inherit; transition: opacity .15s; }
+  .search-bar button:hover { opacity: .8; }
+  .search-bar button:disabled { opacity: .4; cursor: not-allowed; }
+
+  .loading { text-align: center; padding: 4rem 0; color: #888780; font-size: 15px; }
+  .error-msg { background: #fcebeb; color: #a32d2d; border: 0.5px solid #f09595; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 14px; }
+
+  .section-label { font-size: 11px; color: #888780; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 10px; font-weight: 500; }
+  .card { background: #fff; border: 0.5px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  .metric-card { background: #f1efe8; border-radius: 8px; padding: .875rem 1rem; }
+  .metric-label { font-size: 12px; color: #888780; margin-bottom: 4px; }
+  .metric-value { font-size: 20px; font-weight: 500; color: #1a1a18; }
+  .metric-sub { font-size: 12px; color: #888780; margin-top: 2px; }
+  .up { color: #0f6e56; }
+  .down { color: #993c1d; }
+  .neutral { color: #888780; }
+  .badge { display: inline-block; font-size: 11px; padding: 3px 8px; border-radius: 8px; font-weight: 500; }
+  .badge-buy { background: #e1f5ee; color: #0f6e56; }
+  .badge-hold { background: #faeeda; color: #854f0b; }
+  .badge-sell { background: #fcebeb; color: #a32d2d; }
+  .divider { border: none; border-top: 0.5px solid rgba(0,0,0,0.1); margin: 1rem 0; }
+  .row { display: flex; gap: 12px; align-items: stretch; margin-bottom: 12px; }
+  .row.mb-15 { margin-bottom: 1.5rem; }
+  .col { flex: 1; min-width: 0; }
+  .progress-bar { height: 6px; background: #e8e6df; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .progress-fill { height: 100%; border-radius: 3px; }
+  .analyst-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
+  .analyst-label { width: 90px; color: #888780; font-size: 12px; }
+  .analyst-count { min-width: 20px; text-align: right; font-weight: 500; font-size: 13px; }
+  .news-item { padding: 10px 0; border-bottom: 0.5px solid rgba(0,0,0,0.08); }
+  .news-item:last-child { border-bottom: none; }
+  .news-headline { font-size: 13px; font-weight: 500; color: #1a1a18; line-height: 1.4; margin-bottom: 3px; }
+  .news-date { font-size: 11px; color: #888780; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 6px 0; vertical-align: middle; }
+  td:last-child { text-align: right; color: #1a1a18; font-weight: 500; }
+  td:first-child { color: #888780; }
+  .peer-table td { color: #888780; }
+  .peer-table td:first-child { color: #888780; }
+  .peer-table td:last-child { text-align: right; font-weight: 400; color: #888780; }
+  .peer-table .peer-name { color: #1a1a18 !important; font-weight: 500 !important; }
+  .peer-table tr + tr td { border-top: 0.5px solid rgba(0,0,0,0.06); }
+  .col-stack { display: flex; flex-direction: column; gap: 12px; }
+  #dashboard { display: none; }
+
+  @media (max-width: 620px) {
+    .row { flex-direction: column; }
+    .col-stack { gap: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="search-bar">
+    <input type="text" id="stockInput" placeholder="Enter stock name (e.g. Tata Steel, Infosys...)" value="" />
+    <button id="searchBtn" onclick="loadStock()">Search</button>
+  </div>
+
+  <div id="errorBox" class="error-msg" style="display:none"></div>
+  <div id="loadingBox" class="loading" style="display:none">Fetching stock data...</div>
+  <div id="dashboard"></div>
+
+</div>
+
+<script>
+const API_URL = 'http://localhost:8080/medallion/getStock';
+
+function fmt(val, prefix='₹', suffix='') {
+  if (val === null || val === undefined || val === '' || val === '-') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return val;
+  return prefix + n.toLocaleString('en-IN', {maximumFractionDigits: 2}) + suffix;
+}
+function fmtCr(val) {
+  if (!val || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '—';
+  return '₹' + n.toLocaleString('en-IN', {maximumFractionDigits: 0}) + ' Cr';
+}
+function fmtPct(val, showSign=false) {
+  if (val === null || val === undefined || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '—';
+  const sign = showSign && n > 0 ? '+' : '';
+  return sign + n.toFixed(2) + '%';
+}
+function fmtX(val) {
+  if (!val || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '—';
+  return n.toFixed(2) + 'x';
+}
+function colorClass(val) {
+  const n = parseFloat(val);
+  if (isNaN(n)) return '';
+  return n > 0 ? 'up' : n < 0 ? 'down' : 'neutral';
+}
+function findMetric(metrics, key) {
+  if (!metrics) return '';
+  const item = metrics.find(m => m.key === key);
+  return item ? item.value : '';
+}
+function findFinancial(financials, year, cat, key) {
+  if (!financials) return '';
+  const yr = financials.find(f => f.FiscalYear === year);
+  if (!yr) return '';
+  const section = yr.stockFinancials.find(s => s.category === cat);
+  if (!section) return '';
+  const entry = section.entries.find(e => e.key === key);
+  return entry ? entry.value : '';
+}
+function formatDate(str) {
+  if (!str) return '—';
+  try { return new Date(str).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}); }
+  catch(e) { return str.split('T')[0]; }
+}
+function ratingBadge(name) {
+  if (!name) return '';
+  const n = name.toLowerCase();
+  const cls = n.includes('strong buy') || n.includes('buy') || n.includes('bullish') ? 'badge-buy' :
+              n.includes('hold') ? 'badge-hold' :
+              n.includes('sell') ? 'badge-sell' : 'badge-hold';
+  return `<span class="badge ${cls}">${name}</span>`;
+}
+function pctBar(val, max=100, color='#185fa5') {
+  const n = Math.min(Math.abs(parseFloat(val)||0), max);
+  const w = (n / max * 100).toFixed(1);
+  return `<div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:${w}%;background:${color}"></div></div>`;
+}
+
+function render(data) {
+  const m = (data.keyMetrics?.mgmtEffectiveness || []);
+  const sd = data.stockDetailsReusableData || {};
+  const peers = data.companyProfile?.peerCompanyList || [];
+  const news = data.recentNews?.recentNews || [];
+  const actions = data.stockCorporateActionData || {};
+  const sh = data.shareholding || {};
+  const risk = data.riskMeter || {};
+  const analyst = data.analystView || {};
+  const recos = data.recosBar || {};
+  const fin = data.financials?.financials || [];
+  const mfSh = sd.mutualFundShareHolding;
+
+  const price = data.currentPrice?.nse || data.currentPrice?.bse || sd.price || '—';
+  const pctChange = sd.percentChange;
+  const changeClass = colorClass(pctChange);
+  const arrow = parseFloat(pctChange) >= 0 ? '▲' : '▼';
+
+  const yr25INC = (key) => findFinancial(fin, '2025', 'INC', key);
+  const yr25BAL = (key) => findFinancial(fin, '2025', 'BAL', key);
+  const yr25CAS = (key) => findFinancial(fin, '2025', 'CAS', key);
+  const yr24INC = (key) => findFinancial(fin, '2024', 'INC', key);
+
+  const analystRows = (recos.stockAnalyst || []).slice().reverse();
+  const totalAnalysts = recos.noOfRecommendations || 0;
+
+  const dividends = (actions.dividend || []).slice(0, 3);
+  const splits = (actions.splits || []).slice(0, 1);
+  const agms = (actions.annualGeneralMeeting || []).filter(a => a.purpose === 'AGM').slice(0, 1);
+  const boards = (actions.boardMeetings || []).slice(0, 1);
+
+  const html = `
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:1.5rem">
+      <div>
+        <p style="font-size:12px;color:#888780;margin-bottom:4px">NSE: ${data.companyProfile?.exchangeCodeNse || '—'} · BSE: ${data.companyProfile?.exchangeCodeBse || '—'} · ${data.companyProfile?.mgIndustry || '—'}</p>
+        <h1 style="font-size:28px;font-weight:500">${data.companyName || '—'}</h1>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:32px;font-weight:500">₹${parseFloat(price).toLocaleString('en-IN', {maximumFractionDigits:2})}</div>
+        <div style="font-size:13px" class="${changeClass}">${arrow} ${fmtPct(pctChange)} today</div>
+        <div style="font-size:11px;color:#888780;margin-top:2px">${sd.date || ''} ${sd.time || ''}</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col metric-card">
+        <div class="metric-label">Market cap</div>
+        <div class="metric-value">${fmtCr(sd.marketCap)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">52-week range</div>
+        <div class="metric-value" style="font-size:15px">₹${parseFloat(sd.ylow||0).toLocaleString('en-IN')} – ₹${parseFloat(sd.yhigh||0).toLocaleString('en-IN')}</div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${Math.round(((parseFloat(price)-parseFloat(sd.ylow||price))/(parseFloat(sd.yhigh||price+1)-parseFloat(sd.ylow||price)))*100)||50}%;background:#185fa5"></div></div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">P/E ratio (TTM)</div>
+        <div class="metric-value">${fmtX(sd.pPerEBasicExcludingExtraordinaryItemsTTM)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">Dividend yield</div>
+        <div class="metric-value">${fmtPct(sd.currentDividendYieldCommonStockPrimaryIssueLTM)}</div>
+        <div class="metric-sub">${fmt(findMetric(m,'dividendPerShare MostRecentFiscalYear'))} per share</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col metric-card">
+        <div class="metric-label">Today's range</div>
+        <div class="metric-value" style="font-size:15px">₹${parseFloat(sd.low||0).toLocaleString('en-IN')} – ₹${parseFloat(sd.high||0).toLocaleString('en-IN')}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">EPS (TTM)</div>
+        <div class="metric-value">${fmt(findMetric(m,'ePSIncludingExtraOrdinaryItemsTrailing12Month'))}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">Beta</div>
+        <div class="metric-value">${parseFloat(findMetric(m,'beta')||0).toFixed(2)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">Book value/share</div>
+        <div class="metric-value">${fmt(findMetric(m,'bookValuePerShare MostRecentFiscalYear'))}</div>
+      </div>
+    </div>
+
+    <div class="row mb-15">
+      <div class="col metric-card">
+        <div class="metric-label">YTD change</div>
+        <div class="metric-value ${colorClass(sd.priceYTDPricePercentChange)}">${fmtPct(sd.priceYTDPricePercentChange, true)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">52-week change</div>
+        <div class="metric-value ${colorClass(findMetric(m,'price52WeekPricePercentChange'))}">${fmtPct(findMetric(m,'price52WeekPricePercentChange'), true)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">13-week change</div>
+        <div class="metric-value ${colorClass(findMetric(m,'price13WeekPricePercentChange'))}">${fmtPct(findMetric(m,'price13WeekPricePercentChange'), true)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">5-day change</div>
+        <div class="metric-value ${colorClass(sd.price5DayPercentChange)}">${fmtPct(sd.price5DayPercentChange, true)}</div>
+      </div>
+    </div>
+
+    <div class="row mb-15" style="align-items:flex-start">
+      <div class="col">
+        <div class="card">
+          <p class="section-label">FY${fin[0]?.FiscalYear || '2025'} income statement</p>
+          <table>
+            <tr><td>Total revenue</td><td>${fmtCr(yr25INC('Revenue'))}</td></tr>
+            <tr><td>Gross profit</td><td>${fmtCr(yr25INC('GrossProfit'))}</td></tr>
+            <tr><td>Operating income</td><td>${fmtCr(yr25INC('OperatingIncome'))}</td></tr>
+            <tr><td>Net income</td><td style="color:${parseFloat(yr25INC('NetIncome'))>=0?'#0f6e56':'#993c1d'}">${fmtCr(yr25INC('NetIncome'))}</td></tr>
+            <tr><td>EPS (diluted)</td><td>${fmt(yr25INC('DilutedEPSExcludingExtraOrdItems'))}</td></tr>
+            <tr><td>Depreciation &amp; amort.</td><td>${fmtCr(yr25INC('Depreciation/Amortization'))}</td></tr>
+          </table>
+          <hr class="divider">
+          <p class="section-label" style="margin-top:.5rem">FY${fin[1]?.FiscalYear || '2024'} comparison</p>
+          <table>
+            <tr><td>Total revenue</td><td>${fmtCr(yr24INC('Revenue'))}</td></tr>
+            <tr><td>Operating income</td><td>${fmtCr(yr24INC('OperatingIncome'))}</td></tr>
+            <tr><td>Net income</td><td style="color:${parseFloat(yr24INC('NetIncome'))>=0?'#0f6e56':'#993c1d'}">${fmtCr(yr24INC('NetIncome'))}</td></tr>
+            <tr><td>EPS (diluted)</td><td style="color:${parseFloat(yr24INC('DilutedEPSExcludingExtraOrdItems'))>=0?'#0f6e56':'#993c1d'}">${fmt(yr24INC('DilutedEPSExcludingExtraOrdItems'))}</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <p class="section-label">Balance sheet</p>
+          <table>
+            <tr><td>Total assets</td><td>${fmtCr(yr25BAL('TotalAssets'))}</td></tr>
+            <tr><td>Total equity</td><td>${fmtCr(yr25BAL('TotalEquity'))}</td></tr>
+            <tr><td>Total debt</td><td>${fmtCr(yr25BAL('TotalDebt'))}</td></tr>
+            <tr><td>Long-term debt</td><td>${fmtCr(yr25BAL('LongTermDebt'))}</td></tr>
+            <tr><td>Cash &amp; equivalents</td><td>${fmtCr(yr25BAL('CashandShortTermInvestments'))}</td></tr>
+            <tr><td>Total inventory</td><td>${fmtCr(yr25BAL('TotalInventory'))}</td></tr>
+          </table>
+          <hr class="divider">
+          <p class="section-label" style="margin-top:.5rem">Cash flow</p>
+          <table>
+            <tr><td>Operating cash flow</td><td>${fmtCr(yr25CAS('CashfromOperatingActivities'))}</td></tr>
+            <tr><td>Capex</td><td style="color:#993c1d">${fmtCr(yr25CAS('CapitalExpenditures'))}</td></tr>
+            <tr><td>Investing activities</td><td style="color:#993c1d">${fmtCr(yr25CAS('CashfromInvestingActivities'))}</td></tr>
+            <tr><td>Net change in cash</td><td style="color:${parseFloat(yr25CAS('NetChangeinCash'))>=0?'#0f6e56':'#993c1d'}">${fmtCr(yr25CAS('NetChangeinCash'))}</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="row mb-15" style="align-items:flex-start">
+      <div class="col">
+        <div class="card">
+          <p class="section-label">Key metrics</p>
+          <table>
+            <tr><td>Operating margin (TTM)</td><td>${fmtPct(findMetric(m,'operatingMarginTrailing12Month'))}</td></tr>
+            <tr><td>Net profit margin (TTM)</td><td>${fmtPct(findMetric(m,'netProfitMarginPercentTrailing12Month'))}</td></tr>
+            <tr><td>Gross margin (TTM)</td><td>${fmtPct(findMetric(m,'grossMarginTrailing12Month'))}</td></tr>
+            <tr><td>Return on equity</td><td>${fmtPct(findMetric(m,'returnOnAverageEquityMostRecentFiscalYear)'))}</td></tr>
+            <tr><td>Return on assets</td><td>${fmtPct(findMetric(m,'returnOnAverageAssetsMostRecenFiscalYear'))}</td></tr>
+            <tr><td>Current ratio</td><td>${fmtX(findMetric(m,'currentRatioMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Quick ratio</td><td>${fmtX(findMetric(m,'quickRatioMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Debt / equity</td><td>${fmtX(findMetric(m,'totalDebtPerTotalEquityMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Interest coverage</td><td>${fmtX(findMetric(m,'netInterestCoverageMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Inventory turnover</td><td>${fmtX(findMetric(m,'inventoryTurnoverMostRecentFiscalYear'))}</td></tr>
+            <tr><td>5-yr revenue CAGR</td><td>${fmtPct(findMetric(m,'revenueGrowthRate5Year'))}</td></tr>
+            <tr><td>EPS change % TTM</td><td class="${colorClass(findMetric(m,'ePSChangePercentTTMOverTTM'))}">${fmtPct(findMetric(m,'ePSChangePercentTTMOverTTM'), true)}</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="col col-stack">
+        <div class="card">
+          <p class="section-label">Analyst recommendations (${totalAnalysts} analysts)</p>
+          <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:0.5px solid rgba(0,0,0,0.1)">
+            <div style="font-size:15px;font-weight:500;color:#02552e">${analyst.ratingName || '—'}</div>
+            <div style="font-size:12px;color:#888780">Consensus · Mean score ${(recos.meanValue||0).toFixed(2)}</div>
+          </div>
+          ${analystRows.map(r => {
+            const pct = totalAnalysts > 0 ? (r.numberOfAnalysts / totalAnalysts * 100).toFixed(0) : 0;
+            return `<div class="analyst-row">
+              <span class="analyst-label">${r.ratingName}</span>
+              ${pctBar(pct, 100, r.colorCode)}
+              <span class="analyst-count" style="color:${r.colorCode}">${r.numberOfAnalysts}</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="card">
+          <p class="section-label">Shareholding</p>
+          <table>
+            <tr><td>Promoter group</td><td>${fmtPct(sh.categories?.[sh.categories.length-1]?.percentage)}</td></tr>
+            ${mfSh ? `<tr><td>Mutual funds</td><td>${fmtPct(mfSh.percentage)}</td></tr>` : ''}
+          </table>
+          <hr class="divider">
+          <p class="section-label" style="margin-top:.5rem">Risk profile</p>
+          <table>
+            <tr><td>Risk category</td><td>${risk.categoryName || '—'}</td></tr>
+            <tr><td>Standard deviation</td><td>${risk.stdDev || '—'}</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    ${peers.length ? `
+    <div class="card">
+      <p class="section-label">Peer comparison</p>
+      <div style="overflow-x:auto">
+        <table class="peer-table" style="min-width:560px">
+          <thead>
+            <tr style="font-size:11px;color:#888780">
+              <td style="padding-bottom:8px;font-weight:400">Company</td>
+              <td style="padding-bottom:8px;font-weight:400;text-align:right">Price (₹)</td>
+              <td style="padding-bottom:8px;font-weight:400;text-align:right">Mkt cap (Cr)</td>
+              <td style="padding-bottom:8px;font-weight:400;text-align:right">P/E</td>
+              <td style="padding-bottom:8px;font-weight:400;text-align:right">P/B</td>
+              <td style="padding-bottom:8px;font-weight:400;text-align:right">ROE (5yr)</td>
+              <td style="padding-bottom:8px;font-weight:400;text-align:right">Rating</td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="font-size:13px">
+              <td class="peer-name" style="padding:6px 0">${data.companyName}</td>
+              <td style="text-align:right;color:#1a1a18;font-weight:500">${parseFloat(price).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+              <td style="text-align:right;color:#1a1a18">${parseFloat(sd.marketCap||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
+              <td style="text-align:right;color:#1a1a18">${parseFloat(sd.pPerEBasicExcludingExtraordinaryItemsTTM||0).toFixed(2)}</td>
+              <td style="text-align:right;color:#1a1a18">${parseFloat(findMetric(m,'priceToBookMostRecentFiscalYear')||0).toFixed(2)}</td>
+              <td style="text-align:right;color:#1a1a18">${fmtPct(findMetric(m,'returnOnAverageEquity5YearAverage'))}</td>
+              <td style="text-align:right">${ratingBadge(sd.averageRating)}</td>
+            </tr>
+            ${peers.map(p => `
+            <tr style="font-size:13px">
+              <td style="padding:6px 0;color:#888780">${p.companyName}</td>
+              <td style="text-align:right">${parseFloat(p.price||0).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+              <td style="text-align:right">${parseFloat(p.marketCap||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
+              <td style="text-align:right">${parseFloat(p.priceToEarningsValueRatio||0).toFixed(2)}</td>
+              <td style="text-align:right">${parseFloat(p.priceToBookValueRatio||0).toFixed(2)}</td>
+              <td style="text-align:right">${fmtPct(p.returnOnAverageEquity5YearAverage)}</td>
+              <td style="text-align:right">${ratingBadge(p.overallRating)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>` : ''}
+
+    ${dividends.length || splits.length ? `
+    <div class="card">
+      <p class="section-label">Corporate actions</p>
+      <table>
+        ${dividends.map((d,i) => `<tr><td>${i===0?'Latest dividend':'Prev. dividend'}</td><td>₹${d.value}/share (${d.percentage}%) · ${d.interimOrFinal} · ${formatDate(d.xdDate || d.recordDate)}</td></tr>`).join('')}
+        ${splits.map(s => `<tr><td>Stock split</td><td>₹${s.oldFaceValue} → ₹${s.newFaceValue} face value · ${formatDate(s.xsDate)}</td></tr>`).join('')}
+        ${agms.map(a => `<tr><td>Next AGM</td><td>${formatDate(a.agmDate)}</td></tr>`).join('')}
+        ${boards.map(b => `<tr><td>Last board meeting</td><td>${formatDate(b.boardMeetDate)} · ${b.purpose}</td></tr>`).join('')}
+      </table>
+    </div>` : ''}
+
+    ${news.length ? `
+    <div class="card">
+      <p class="section-label">Recent news</p>
+      ${news.map(n => `
+      <div class="news-item">
+        <div class="news-headline">${n.headline}</div>
+        <div class="news-date">${formatDate(n.date)}</div>
+      </div>`).join('')}
+    </div>` : ''}
+  `;
+
+  const dash = document.getElementById('dashboard');
+  dash.innerHTML = html;
+  dash.style.display = 'block';
+}
+
+async function loadStock(stockName) {
+  const input = stockName || document.getElementById('stockInput').value.trim();
+  if (!input) return;
+
+  document.getElementById('stockInput').value = input;
+
+  const btn = document.getElementById('searchBtn');
+  const errorBox = document.getElementById('errorBox');
+  const loadingBox = document.getElementById('loadingBox');
+  const dash = document.getElementById('dashboard');
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  errorBox.style.display = 'none';
+  loadingBox.style.display = 'block';
+  dash.style.display = 'none';
+
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock: input })
+    });
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    const data = await res.json();
+    if (!data || !data.companyName) throw new Error('Invalid response from server');
+    render(data);
+  } catch (err) {
+    errorBox.textContent = `Failed to load stock data: ${err.message}. Make sure the API server is running at ${API_URL}.`;
+    errorBox.style.display = 'block';
+  } finally {
+    loadingBox.style.display = 'none';
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(window.location.search);
+  const stockName = params.get('stockname');
+  if (stockName) loadStock(stockName);
+});
+document.getElementById('stockInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadStock();
+});
+
+window.addEventListener('DOMContentLoaded', () => loadStock());
+</script>
+</body>
+</html>

@@ -14,6 +14,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestTemplate;
 
 import com.medallion.Medallion.dto.DataSetDto;
+import com.medallion.Medallion.dto.StockDto;
 
 @Component
 public class ApiService {
@@ -33,14 +34,15 @@ public class ApiService {
 	@Autowired
 	private ApiResponses apiResponses;
 
-	public String getStockData(String stockName) {
+	public StockDto getStockData(String stockName) {
 		RestTemplate restTemplate = new RestTemplate();
 		String url = apiurl + "/stock?name=" + stockName;
 		HttpHeaders headers = new HttpHeaders();
 		headers.set("x-api-key", apiKey);
 		HttpEntity<Void> entity = new HttpEntity<>(headers);
 		ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-		return response.getBody();
+		String data = response.getBody();
+		return apiResponses.formStockDto(data);
 	}
 
 	public String getTrendingStocks() {
@@ -58,8 +60,8 @@ public class ApiService {
 		HttpHeaders headers = new HttpHeaders();
 		headers.set("x-api-key", apiKey);
 		HttpEntity<String> entity = new HttpEntity<>(headers);
-		String url = apiurl+"/historical_data" + "?stock_name=" + stockName + "&period=" + period
-				+ "&filter=" + filter;
+		String url = apiurl + "/historical_data" + "?stock_name=" + stockName + "&period=" + period + "&filter="
+				+ filter;
 		ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
 		String data = response.getBody();
 		return apiResponses.formDataSet(data);
