@@ -167,6 +167,7 @@ public class MedallionServiceImpl implements MedallionService {
 		} else {
 			stockDto = modelMapper.map(stockentity, StockDto.class);
 		}
+		stockDto.setDataSetDto(getHistoricalPrice(stockRequest.getStock()));
 		return stockDto;
 	}
 
@@ -196,6 +197,22 @@ public class MedallionServiceImpl implements MedallionService {
 		result.setMultidays(multidays);
 		result.setDataSetDto(dataSetDto);
 		return result;
+	}
+	
+	@Override
+	public DataSetDto getHistoricalPrice(String stockname) {
+		DataSetDto dataSetDto = null;
+		DatasetEntity dataset = dataSetRepository.findTopByStocknameAndCreatedDateLessThanEqualOrderByCreatedDateDesc(
+				stockname, LocalDate.now());
+		if (dataset == null) {
+			dataSetDto = apiService.getHistoricalData(stockname, "6m", "default");
+			DatasetEntity datasetEntity = modelMapper.map(dataSetDto, DatasetEntity.class);
+			datasetEntity.setStockname(stockname);
+			dataSetRepository.save(datasetEntity);
+		} else {
+			dataSetDto = modelMapper.map(dataset, DataSetDto.class);
+		}
+		return dataSetDto;
 	}
 
 }

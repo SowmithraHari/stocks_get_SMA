@@ -30,6 +30,17 @@ public class StockDto {
 	private StockFinancialDataDto stockFinancialData;
 
 	private RecentNewsResponseDto recentNews;
+	
+	private DataSetDto dataSetDto;
+	
+
+	public DataSetDto getDataSetDto() {
+		return dataSetDto;
+	}
+
+	public void setDataSetDto(DataSetDto dataSetDto) {
+		this.dataSetDto = dataSetDto;
+	}
 
 	public String getCompanyName() {
 		return companyName;
