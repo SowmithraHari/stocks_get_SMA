@@ -93,7 +93,7 @@ public class ApiResponses {
 			}
 		}
 
-		if (json.has("keyMetrics")) {
+		if (json.has("keyMetrics") && !json.isNull("keyMetrics")) {
 			stockDto.setKeyMetrics(formKeyMetrics(data));
 		}
 
