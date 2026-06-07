@@ -1,0 +1,959 @@
+import { getStockDetailsData, API_BASE_URL } from './apiClient';
+
+export function initStockDetailsPage() {
+
+let globalChartData = null;
+
+function fmt(val, prefix='₹', suffix='') {
+  if (val === null || val === undefined || val === '' || val === '-') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return val;
+  return prefix + n.toLocaleString('en-IN', {maximumFractionDigits: 2}) + suffix;
+}
+function fmtCr(val) {
+  if (!val || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '—';
+  return '₹' + n.toLocaleString('en-IN', {maximumFractionDigits: 0}) + ' Cr';
+}
+function fmtPct(val, showSign=false) {
+  if (val === null || val === undefined || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '—';
+  const sign = showSign && n > 0 ? '+' : '';
+  return sign + n.toFixed(2) + '%';
+}
+function fmtX(val) {
+  if (!val || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '—';
+  return n.toFixed(2) + 'x';
+}
+function fmtNum(val) {
+  if (val === null || val === undefined || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return val;
+  return n.toLocaleString('en-IN', {maximumFractionDigits: 2});
+}
+function colorClass(val) {
+  const n = parseFloat(val);
+  if (isNaN(n)) return '';
+  return n > 0 ? 'up' : n < 0 ? 'down' : 'neutral';
+}
+function findMetric(metrics, key) {
+  if (!metrics) return '';
+  const item = metrics.find(m => m.key === key);
+  return item ? item.value : '';
+}
+function findMetricInAll(keyMetrics, key) {
+  if (!keyMetrics) return '';
+  const cats = ['mgmtEffectiveness', 'margins', 'financialStrength', 'valuation', 'growth', 'perShare', 'priceAndVolume'];
+  for (const cat of cats) {
+    const arr = keyMetrics[cat] || [];
+    const item = arr.find(m => m.key === key);
+    if (item) return item.value;
+  }
+  return '';
+}
+function findFinancial(financials, year, cat, key) {
+  if (!financials) return '';
+  const yr = financials.find(f => f.FiscalYear === year);
+  if (!yr) return '';
+  const section = yr.stockFinancials.find(s => s.category === cat);
+  if (!section) return '';
+  const entry = section.entries.find(e => e.key === key);
+  return entry ? entry.value : '';
+}
+function formatDate(str) {
+  if (!str) return '—';
+  try { return new Date(str).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}); }
+  catch(e) { return str.split('T')[0]; }
+}
+function formatShortDate(str) {
+  if (!str) return '—';
+  try { return new Date(str).toLocaleDateString('en-IN', {day:'2-digit', month:'short'}); }
+  catch(e) { return str; }
+}
+function ratingBadge(name) {
+  if (!name) return '';
+  const n = name.toLowerCase();
+  const cls = n.includes('strong buy') || n.includes('buy') || n.includes('bullish') ? 'badge-buy' :
+              n.includes('hold') ? 'badge-hold' :
+              n.includes('sell') ? 'badge-sell' : 'badge-hold';
+  return `<span class="badge ${cls}">${name}</span>`;
+}
+function pctBar(val, max=100, color='#185fa5') {
+  const n = Math.min(Math.abs(parseFloat(val)||0), max);
+  const w = (n / max * 100).toFixed(1);
+  return `<div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:${w}%;background:${color}"></div></div>`;
+}
+
+// ==================== CANDLESTICK CHART RENDERING ====================
+function drawCandlestickChart(priceData, volumeData, dma50Data, dma200Data, timeframe = '6m') {
+  const priceCanvas = document.getElementById('priceChart');
+  const volumeCanvas = document.getElementById('volumeChart');
+  if (!priceCanvas || !volumeCanvas || !priceData || priceData.length === 0) return;
+
+  const pCtx = priceCanvas.getContext('2d');
+  const vCtx = volumeCanvas.getContext('2d');
+
+  // Responsive canvas sizing
+  const container = priceCanvas.parentElement;
+  priceCanvas.width = container.offsetWidth;
+  priceCanvas.height = container.offsetHeight;
+  volumeCanvas.width = container.offsetWidth;
+  volumeCanvas.height = 70;
+
+  // Filter data based on timeframe (default 1 year)
+  let filteredPrice = priceData;
+  let filteredVolume = volumeData || [];
+  let filteredDma50 = dma50Data || [];
+  let filteredDma200 = dma200Data || [];
+  
+  const now = new Date();
+  let cutoff;
+  if (timeframe === '1m') {
+    cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  } else if (timeframe === '3m') {
+    cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+  } else if (timeframe === '6m') {
+    cutoff = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+  } else if (timeframe === '1y') {
+    cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+  } else {
+    cutoff = null; // all data
+  }
+  
+  if (cutoff) {
+    filteredPrice = priceData.filter(d => new Date(d.date) >= cutoff);
+  }
+
+  // Sync other data arrays to same date range
+  if (filteredPrice.length > 0) {
+    const startDate = filteredPrice[0].date;
+    const endDate = filteredPrice[filteredPrice.length - 1].date;
+    filteredVolume = filteredVolume.filter(d => d.date >= startDate && d.date <= endDate);
+    filteredDma50 = filteredDma50.filter(d => d.date >= startDate && d.date <= endDate);
+    filteredDma200 = filteredDma200.filter(d => d.date >= startDate && d.date <= endDate);
+  }
+
+  // Generate OHLC candlestick data from closing prices
+  const candles = [];
+  for (let i = 0; i < filteredPrice.length; i++) {
+    const close = parseFloat(filteredPrice[i].value);
+    const prevClose = i > 0 ? parseFloat(filteredPrice[i-1].value) : close;
+    const open = prevClose;
+    // Simulate high/low with small variance based on price movement
+    const change = Math.abs(close - open);
+    const variance = Math.max(change * 0.3, close * 0.005);
+    const high = Math.max(open, close) + variance * Math.random();
+    const low = Math.min(open, close) - variance * Math.random();
+    
+    candles.push({
+      date: filteredPrice[i].date,
+      open: open,
+      high: high,
+      low: low,
+      close: close,
+      volume: filteredVolume[i] ? parseFloat(filteredVolume[i].value) : 0
+    });
+  }
+
+  const dma50Vals = filteredDma50.map(d => parseFloat(d.value));
+  const dma200Vals = filteredDma200.map(d => parseFloat(d.value));
+
+  // Calculate bounds including high/low of candles
+  const allHighs = candles.map(c => c.high);
+  const allLows = candles.map(c => c.low);
+  const allMAs = [...dma50Vals.filter(v => !isNaN(v)), ...dma200Vals.filter(v => !isNaN(v))];
+  const minPrice = Math.min(...allLows, ...allMAs) * 0.98;
+  const maxPrice = Math.max(...allHighs, ...allMAs) * 1.02;
+  const maxVolume = Math.max(...candles.map(c => c.volume), 1);
+
+  const padding = { left: 60, right: 20, top: 20, bottom: 30 };
+  const chartWidth = priceCanvas.width - padding.left - padding.right;
+  const chartHeight = priceCanvas.height - padding.top - padding.bottom;
+
+  // Clear canvases
+  pCtx.clearRect(0, 0, priceCanvas.width, priceCanvas.height);
+  vCtx.clearRect(0, 0, volumeCanvas.width, volumeCanvas.height);
+
+  // Draw grid lines
+  pCtx.strokeStyle = 'rgba(0,0,0,0.06)';
+  pCtx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = padding.top + (chartHeight * i / 5);
+    pCtx.beginPath();
+    pCtx.moveTo(padding.left, y);
+    pCtx.lineTo(priceCanvas.width - padding.right, y);
+    pCtx.stroke();
+    
+    // Price labels
+    const priceVal = maxPrice - ((maxPrice - minPrice) * i / 5);
+    pCtx.fillStyle = '#888780';
+    pCtx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+    pCtx.textAlign = 'right';
+    pCtx.fillText('₹' + priceVal.toFixed(2), padding.left - 8, y + 4);
+  }
+
+  // Calculate candle width
+  const candleSpacing = chartWidth / candles.length;
+  const candleWidth = Math.max(1, Math.min(8, candleSpacing * 0.7));
+  const wickWidth = Math.max(1, candleWidth * 0.15);
+
+  // Draw candlesticks
+  candles.forEach((candle, i) => {
+    const x = padding.left + (i + 0.5) * candleSpacing;
+    const isUp = candle.close >= candle.open;
+    
+    // Colors
+    const bullColor = '#0f6e56';
+    const bearColor = '#993c1d';
+    const color = isUp ? bullColor : bearColor;
+    
+    // Y coordinates
+    const yHigh = padding.top + ((maxPrice - candle.high) / (maxPrice - minPrice)) * chartHeight;
+    const yLow = padding.top + ((maxPrice - candle.low) / (maxPrice - minPrice)) * chartHeight;
+    const yOpen = padding.top + ((maxPrice - candle.open) / (maxPrice - minPrice)) * chartHeight;
+    const yClose = padding.top + ((maxPrice - candle.close) / (maxPrice - minPrice)) * chartHeight;
+    
+    // Draw wick (high-low line)
+    pCtx.beginPath();
+    pCtx.strokeStyle = color;
+    pCtx.lineWidth = wickWidth;
+    pCtx.moveTo(x, yHigh);
+    pCtx.lineTo(x, yLow);
+    pCtx.stroke();
+    
+    // Draw candle body
+    const bodyTop = Math.min(yOpen, yClose);
+    const bodyHeight = Math.max(1, Math.abs(yClose - yOpen));
+    
+    pCtx.fillStyle = isUp ? bullColor : bearColor;
+    pCtx.fillRect(x - candleWidth/2, bodyTop, candleWidth, bodyHeight);
+    
+    // Add border for hollow effect on up candles (optional style)
+    if (isUp && candleWidth > 3) {
+      pCtx.strokeStyle = bullColor;
+      pCtx.lineWidth = 1;
+      pCtx.strokeRect(x - candleWidth/2, bodyTop, candleWidth, bodyHeight);
+    }
+  });
+
+  // Draw moving averages
+  function drawMALine(data, color, lineWidth = 1.5) {
+    if (data.length === 0) return;
+    pCtx.beginPath();
+    pCtx.strokeStyle = color;
+    pCtx.lineWidth = lineWidth;
+    pCtx.lineJoin = 'round';
+    pCtx.lineCap = 'round';
+    
+    let started = false;
+    data.forEach((val, i) => {
+      if (isNaN(val)) return;
+      const x = padding.left + (i + 0.5) * candleSpacing;
+      const y = padding.top + ((maxPrice - val) / (maxPrice - minPrice)) * chartHeight;
+      if (!started) {
+        pCtx.moveTo(x, y);
+        started = true;
+      } else {
+        pCtx.lineTo(x, y);
+      }
+    });
+    pCtx.stroke();
+  }
+
+  if (dma200Vals.length > 0) drawMALine(dma200Vals, '#f59e0b', 1.5);
+  if (dma50Vals.length > 0) drawMALine(dma50Vals, '#8b5cf6', 1.5);
+
+  // Draw date labels
+  const dateLabels = Math.min(6, candles.length);
+  pCtx.fillStyle = '#888780';
+  pCtx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+  pCtx.textAlign = 'center';
+  for (let i = 0; i < dateLabels; i++) {
+    const idx = Math.floor(i * (candles.length - 1) / (dateLabels - 1));
+    const x = padding.left + (idx + 0.5) * candleSpacing;
+    pCtx.fillText(formatShortDate(candles[idx]?.date), x, priceCanvas.height - 10);
+  }
+
+  // Draw volume bars
+  const vPadding = { left: 60, right: 20, top: 5, bottom: 5 };
+  const vChartWidth = volumeCanvas.width - vPadding.left - vPadding.right;
+  const vChartHeight = volumeCanvas.height - vPadding.top - vPadding.bottom;
+  const volBarSpacing = vChartWidth / candles.length;
+  const volBarWidth = Math.max(1, volBarSpacing * 0.7);
+
+  candles.forEach((candle, i) => {
+    if (candle.volume <= 0) return;
+    const x = vPadding.left + (i + 0.5) * volBarSpacing;
+    const barHeight = (candle.volume / maxVolume) * vChartHeight;
+    const isUp = candle.close >= candle.open;
+    
+    vCtx.fillStyle = isUp ? 'rgba(15, 110, 86, 0.6)' : 'rgba(153, 60, 29, 0.6)';
+    vCtx.fillRect(x - volBarWidth/2, vChartHeight + vPadding.top - barHeight, volBarWidth, barHeight);
+  });
+
+  // Add hover tooltip functionality
+  priceCanvas.onmousemove = (e) => {
+    const rect = priceCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const idx = Math.floor((x - padding.left) / candleSpacing);
+    
+    if (idx >= 0 && idx < candles.length) {
+      const tooltip = document.getElementById('chartTooltip');
+      const c = candles[idx];
+      const isUp = c.close >= c.open;
+      tooltip.innerHTML = `
+        <div style="font-weight:600;color:${isUp ? '#4ade80' : '#f87171'}">₹${c.close.toFixed(2)}</div>
+        <div style="opacity:0.9;font-size:11px">O: ₹${c.open.toFixed(2)} H: ₹${c.high.toFixed(2)}</div>
+        <div style="opacity:0.9;font-size:11px">L: ₹${c.low.toFixed(2)} C: ₹${c.close.toFixed(2)}</div>
+        <div style="opacity:0.8;margin-top:4px">${formatDate(c.date)}</div>
+        ${c.volume > 0 ? `<div style="opacity:0.7;font-size:11px">Vol: ${(c.volume/100000).toFixed(2)}L</div>` : ''}
+      `;
+      tooltip.style.display = 'block';
+      const candleX = padding.left + (idx + 0.5) * candleSpacing;
+      const candleY = padding.top + ((maxPrice - c.close) / (maxPrice - minPrice)) * chartHeight;
+      tooltip.style.left = candleX + 'px';
+      tooltip.style.top = (candleY - 10) + 'px';
+    }
+  };
+  
+  priceCanvas.onmouseleave = () => {
+    document.getElementById('chartTooltip').style.display = 'none';
+  };
+}
+
+function initChart(data) {
+  const ds = data.dataSetDto;
+  if (!ds) return;
+
+  globalChartData = {
+    price: ds.price?.values || [],
+    volume: ds.volume?.values || [],
+    dma50: ds.dma50?.values || [],
+    dma200: ds.dma200?.values || []
+  };
+
+  drawCandlestickChart(globalChartData.price, globalChartData.volume, globalChartData.dma50, globalChartData.dma200, '6m');
+
+  // Setup timeframe buttons
+  document.querySelectorAll('.timeframe-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.timeframe-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      drawCandlestickChart(globalChartData.price, globalChartData.volume, globalChartData.dma50, globalChartData.dma200, btn.dataset.tf);
+    };
+  });
+
+  // Redraw on resize
+  window.addEventListener('resize', () => {
+    const activeBtn = document.querySelector('.timeframe-btn.active');
+    const tf = activeBtn ? activeBtn.dataset.tf : '6m';
+    drawCandlestickChart(globalChartData.price, globalChartData.volume, globalChartData.dma50, globalChartData.dma200, tf);
+  });
+}
+
+// ==================== TAB FUNCTIONALITY ====================
+function setupTabs() {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.onclick = () => {
+      const tabGroup = btn.closest('.card').querySelectorAll('.tab-btn');
+      const contents = btn.closest('.card').querySelectorAll('.tab-content');
+      tabGroup.forEach(b => b.classList.remove('active'));
+      contents.forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.tab).classList.add('active');
+    };
+  });
+}
+
+function render(data) {
+  const km = data.keyMetrics || {};
+  const m = km.mgmtEffectiveness || [];
+  const margins = km.margins || [];
+  const finStrength = km.financialStrength || [];
+  const valuation = km.valuation || [];
+  const growth = km.growth || [];
+  const perShare = km.perShare || [];
+  const priceVol = km.priceAndVolume || [];
+  
+  const sd = data.stockDetailsReusableData || {};
+  const cp = data.companyProfile || {};
+  const tech = data.stockTechnicalData || {};
+  const peers = cp.peerCompanyList || [];
+  const news = data.recentNews?.recentNews || [];
+  const actions = data.stockCorporateActionData || {};
+  const sh = data.shareholding || {};
+  const risk = data.riskMeter || {};
+  const analyst = data.analystView || {};
+  const recos = data.recosBar || {};
+  const fin = data.financials?.financials || [];
+  const mfSh = sd.mutualFundShareHolding;
+  const ds = data.dataSetDto || {};
+
+  const price = data.currentPrice?.nse || data.currentPrice?.bse || sd.price || '—';
+  const bsePrice = tech.bsePrice || sd.price;
+  const nsePrice = tech.nsePrice || sd.price;
+  const pctChange = sd.percentChange;
+  const changeClass = colorClass(pctChange);
+  const changeVal = sd.change || 0;
+  const arrow = parseFloat(pctChange) >= 0 ? '▲' : '▼';
+
+  const yr25INC = (key) => findFinancial(fin, '2025', 'INC', key);
+  const yr25BAL = (key) => findFinancial(fin, '2025', 'BAL', key);
+  const yr25CAS = (key) => findFinancial(fin, '2025', 'CAS', key);
+  const yr24INC = (key) => findFinancial(fin, '2024', 'INC', key);
+  const yr24BAL = (key) => findFinancial(fin, '2024', 'BAL', key);
+  const yr23INC = (key) => findFinancial(fin, '2023', 'INC', key);
+
+  const analystRows = (recos.stockAnalyst || []).slice().reverse();
+  const totalAnalysts = recos.noOfRecommendations || 0;
+
+  const dividends = (actions.dividend || []).slice(0, 5);
+  const splits = (actions.splits || []).slice(0, 3);
+  const agms = (actions.annualGeneralMeeting || []).slice(0, 2);
+  const boards = (actions.boardMeetings || []).slice(0, 3);
+  const bonuses = (actions.bonus || []).slice(0, 2);
+  const rights = (actions.rights || []).slice(0, 2);
+
+  // Get all shareholding categories
+  const shCategories = sh.categories || [];
+  const shHistory = sh.shareholdingHistory || [];
+
+  // Get DMA values
+  const dma50 = ds.dma50?.values?.[ds.dma50?.values?.length - 1]?.value || '';
+  const dma200 = ds.dma200?.values?.[ds.dma200?.values?.length - 1]?.value || '';
+
+  const html = `
+    <!-- Enhanced Stock Header -->
+    <div class="stock-header">
+      <div class="stock-info">
+        <div class="stock-codes">
+          <span>NSE: ${cp.exchangeCodeNse || '—'}</span>
+          <span>BSE: ${cp.exchangeCodeBse || '—'}</span>
+          <span>ISIN: ${cp.isinId || '—'}</span>
+        </div>
+        <h1 class="stock-name">${data.companyName || '—'}</h1>
+        <div class="stock-industry">${cp.mgIndustry || '—'}</div>
+      </div>
+      <div class="price-section">
+        <div class="current-price">₹${parseFloat(price).toLocaleString('en-IN', {maximumFractionDigits:2})}</div>
+        <div class="price-change ${changeClass}">
+          ${arrow} ₹${Math.abs(parseFloat(changeVal)).toFixed(2)} (${fmtPct(pctChange)})
+        </div>
+        <div class="price-time">${sd.date || ''} ${sd.time || ''}</div>
+      </div>
+    </div>
+
+    <!-- Quick Stats Bar -->
+    <div class="quick-stats">
+      <div class="quick-stat">
+        <div class="quick-stat-label">Market Cap</div>
+        <div class="quick-stat-value">${fmtCr(sd.marketCap)}</div>
+      </div>
+      <div class="quick-stat">
+        <div class="quick-stat-label">P/E Ratio</div>
+        <div class="quick-stat-value">${fmtX(sd.pPerEBasicExcludingExtraordinaryItemsTTM)}</div>
+      </div>
+      <div class="quick-stat">
+        <div class="quick-stat-label">52W High</div>
+        <div class="quick-stat-value">₹${fmtNum(sd.yhigh)}</div>
+      </div>
+      <div class="quick-stat">
+        <div class="quick-stat-label">52W Low</div>
+        <div class="quick-stat-value">₹${fmtNum(sd.ylow)}</div>
+      </div>
+      <div class="quick-stat">
+        <div class="quick-stat-label">YTD Change</div>
+        <div class="quick-stat-value ${parseFloat(sd.priceYTDPricePercentChange) >= 0 ? 'up' : 'down'}">${fmtPct(sd.priceYTDPricePercentChange, true)}</div>
+      </div>
+      <div class="quick-stat">
+        <div class="quick-stat-label">Div. Yield</div>
+        <div class="quick-stat-value">${fmtPct(sd.currentDividendYieldCommonStockPrimaryIssueLTM)}</div>
+      </div>
+    </div>
+
+    <!-- Price Chart -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">Price History</div>
+        <div class="chart-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:#0f6e56"></div>Price</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>50 DMA</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>200 DMA</div>
+        </div>
+        <div class="chart-timeframe">
+          <button class="timeframe-btn" data-tf="1m">1M</button>
+          <button class="timeframe-btn" data-tf="3m">3M</button>
+          <button class="timeframe-btn active" data-tf="6m">6M</button>
+          <button class="timeframe-btn" data-tf="all">All</button>
+        </div>
+      </div>
+      <div class="chart-container">
+        <canvas id="priceChart" class="chart-canvas"></canvas>
+        <div id="chartTooltip" class="chart-tooltip" style="display:none"></div>
+      </div>
+      <div class="volume-container">
+        <canvas id="volumeChart" style="width:100%;height:100%"></canvas>
+      </div>
+    </div>
+
+    <!-- Key Metrics Grid -->
+    <div class="row">
+      <div class="col metric-card">
+        <div class="metric-label">Open</div>
+        <div class="metric-value">₹${fmtNum(sd.open)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">High / Low</div>
+        <div class="metric-value" style="font-size:15px">₹${fmtNum(sd.high)} / ₹${fmtNum(sd.low)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">Volume</div>
+        <div class="metric-value">${sd.volume ? (parseFloat(sd.volume)/100000).toFixed(2) + 'L' : '—'}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">Avg Volume (20D)</div>
+        <div class="metric-value">${findMetric(priceVol, 'average20DayVolumeInShares(000)')}</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col metric-card">
+        <div class="metric-label">52-week range</div>
+        <div class="metric-value" style="font-size:15px">₹${fmtNum(sd.ylow)} – ₹${fmtNum(sd.yhigh)}</div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${Math.round(((parseFloat(price)-parseFloat(sd.ylow||price))/(parseFloat(sd.yhigh||price+1)-parseFloat(sd.ylow||price)))*100)||50}%;background:#185fa5"></div></div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">50 Day MA</div>
+        <div class="metric-value">₹${parseFloat(dma50||0).toFixed(2)}</div>
+        <div class="metric-sub ${parseFloat(price) > parseFloat(dma50) ? 'up' : 'down'}">${parseFloat(price) > parseFloat(dma50) ? 'Above' : 'Below'} 50 DMA</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">200 Day MA</div>
+        <div class="metric-value">₹${parseFloat(dma200||0).toFixed(2)}</div>
+        <div class="metric-sub ${parseFloat(price) > parseFloat(dma200) ? 'up' : 'down'}">${parseFloat(price) > parseFloat(dma200) ? 'Above' : 'Below'} 200 DMA</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">Beta</div>
+        <div class="metric-value">${parseFloat(findMetric(m,'beta')||0).toFixed(2)}</div>
+        <div class="metric-sub">${parseFloat(findMetric(m,'beta')||0) > 1 ? 'High volatility' : 'Low volatility'}</div>
+      </div>
+    </div>
+
+    <div class="row mb-15">
+      <div class="col metric-card">
+        <div class="metric-label">5-day change</div>
+        <div class="metric-value ${colorClass(sd.price5DayPercentChange)}">${fmtPct(sd.price5DayPercentChange, true)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">13-week change</div>
+        <div class="metric-value ${colorClass(findMetric(priceVol,'price13WeekPricePercentChange'))}">${fmtPct(findMetric(priceVol,'price13WeekPricePercentChange'), true)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">52-week change</div>
+        <div class="metric-value ${colorClass(findMetric(priceVol,'price52WeekPricePercentChange'))}">${fmtPct(findMetric(priceVol,'price52WeekPricePercentChange'), true)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">YTD change</div>
+        <div class="metric-value ${colorClass(sd.priceYTDPricePercentChange)}">${fmtPct(sd.priceYTDPricePercentChange, true)}</div>
+      </div>
+    </div>
+
+    <!-- Price Comparison -->
+    <div class="row mb-15">
+      <div class="col metric-card">
+        <div class="metric-label">NSE Price</div>
+        <div class="metric-value">₹${fmtNum(nsePrice)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">BSE Price</div>
+        <div class="metric-value">₹${fmtNum(bsePrice)}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">EPS (TTM)</div>
+        <div class="metric-value">${fmt(findMetric(perShare,'ePSIncludingExtraOrdinaryItemsTrailing12Month'))}</div>
+      </div>
+      <div class="col metric-card">
+        <div class="metric-label">Book Value/Share</div>
+        <div class="metric-value">${fmt(findMetric(perShare,'bookValuePerShare MostRecentFiscalYear'))}</div>
+      </div>
+    </div>
+
+    <!-- Financials Section -->
+    <div class="row mb-15" style="align-items:flex-start">
+      <div class="col">
+        <div class="card">
+          <p class="section-label">FY${fin[0]?.FiscalYear || '2025'} Income Statement</p>
+          <table>
+            <tr><td>Total Revenue</td><td>${fmtCr(yr25INC('Revenue'))}</td></tr>
+            <tr><td>Gross Profit</td><td>${fmtCr(yr25INC('GrossProfit'))}</td></tr>
+            <tr><td>Operating Income</td><td>${fmtCr(yr25INC('OperatingIncome'))}</td></tr>
+            <tr><td>EBITDA</td><td>${fmtCr(yr25INC('EBITDA'))}</td></tr>
+            <tr><td>Net Income</td><td style="color:${parseFloat(yr25INC('NetIncome'))>=0?'#0f6e56':'#993c1d'}">${fmtCr(yr25INC('NetIncome'))}</td></tr>
+            <tr><td>EPS (Diluted)</td><td>${fmt(yr25INC('DilutedEPSExcludingExtraOrdItems'))}</td></tr>
+            <tr><td>Depreciation & Amort.</td><td>${fmtCr(yr25INC('Depreciation/Amortization'))}</td></tr>
+            <tr><td>Interest Expense</td><td>${fmtCr(yr25INC('InterestExpense'))}</td></tr>
+          </table>
+          <hr class="divider">
+          <p class="section-label" style="margin-top:.5rem">YoY Comparison</p>
+          <table>
+            <tr><td>FY${fin[1]?.FiscalYear || '24'} Revenue</td><td>${fmtCr(yr24INC('Revenue'))}</td></tr>
+            <tr><td>FY${fin[1]?.FiscalYear || '24'} Net Income</td><td style="color:${parseFloat(yr24INC('NetIncome'))>=0?'#0f6e56':'#993c1d'}">${fmtCr(yr24INC('NetIncome'))}</td></tr>
+            <tr><td>FY${fin[2]?.FiscalYear || '23'} Revenue</td><td>${fmtCr(yr23INC('Revenue'))}</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <p class="section-label">Balance Sheet (FY${fin[0]?.FiscalYear || '2025'})</p>
+          <table>
+            <tr><td>Total Assets</td><td>${fmtCr(yr25BAL('TotalAssets'))}</td></tr>
+            <tr><td>Total Liabilities</td><td>${fmtCr(yr25BAL('TotalLiabilities'))}</td></tr>
+            <tr><td>Total Equity</td><td>${fmtCr(yr25BAL('TotalEquity'))}</td></tr>
+            <tr><td>Total Debt</td><td>${fmtCr(yr25BAL('TotalDebt'))}</td></tr>
+            <tr><td>Long-term Debt</td><td>${fmtCr(yr25BAL('LongTermDebt'))}</td></tr>
+            <tr><td>Short-term Debt</td><td>${fmtCr(yr25BAL('ShortTermDebt'))}</td></tr>
+            <tr><td>Cash & Equivalents</td><td>${fmtCr(yr25BAL('CashandShortTermInvestments'))}</td></tr>
+            <tr><td>Total Inventory</td><td>${fmtCr(yr25BAL('TotalInventory'))}</td></tr>
+            <tr><td>Net Receivables</td><td>${fmtCr(yr25BAL('NetReceivables'))}</td></tr>
+          </table>
+          <hr class="divider">
+          <p class="section-label" style="margin-top:.5rem">Cash Flow</p>
+          <table>
+            <tr><td>Operating Cash Flow</td><td>${fmtCr(yr25CAS('CashfromOperatingActivities'))}</td></tr>
+            <tr><td>Capital Expenditure</td><td style="color:#993c1d">${fmtCr(yr25CAS('CapitalExpenditures'))}</td></tr>
+            <tr><td>Free Cash Flow</td><td style="color:${parseFloat(yr25CAS('FreeCashFlow'))>=0?'#0f6e56':'#993c1d'}">${fmtCr(yr25CAS('FreeCashFlow'))}</td></tr>
+            <tr><td>Financing Activities</td><td>${fmtCr(yr25CAS('CashfromFinancingActivities'))}</td></tr>
+            <tr><td>Net Change in Cash</td><td style="color:${parseFloat(yr25CAS('NetChangeinCash'))>=0?'#0f6e56':'#993c1d'}">${fmtCr(yr25CAS('NetChangeinCash'))}</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key Metrics Detailed -->
+    <div class="row mb-15" style="align-items:flex-start">
+      <div class="col">
+        <div class="card">
+          <p class="section-label">Profitability & Margins</p>
+          <table>
+            <tr><td>Gross Margin (TTM)</td><td>${fmtPct(findMetric(margins,'grossMarginTrailing12Month'))}</td></tr>
+            <tr><td>Operating Margin (TTM)</td><td>${fmtPct(findMetric(margins,'operatingMarginTrailing12Month'))}</td></tr>
+            <tr><td>Net Profit Margin (TTM)</td><td>${fmtPct(findMetric(margins,'netProfitMarginPercentTrailing12Month'))}</td></tr>
+            <tr><td>EBITDA Margin (TTM)</td><td>${fmtPct(findMetric(margins,'eBITDAMarginTrailing12Month'))}</td></tr>
+            <tr><td>Pre-Tax Margin (TTM)</td><td>${fmtPct(findMetric(margins,'preTaxMarginTrailing12Month'))}</td></tr>
+          </table>
+          <hr class="divider">
+          <p class="section-label" style="margin-top:.5rem">Management Effectiveness</p>
+          <table>
+            <tr><td>Return on Equity (ROE)</td><td>${fmtPct(findMetric(m,'returnOnAverageEquityMostRecentFiscalYear)'))}</td></tr>
+            <tr><td>ROE 5-Year Avg</td><td>${fmtPct(findMetric(m,'returnOnAverageEquity5YearAverage'))}</td></tr>
+            <tr><td>Return on Assets (ROA)</td><td>${fmtPct(findMetric(m,'returnOnAverageAssetsMostRecenFiscalYear'))}</td></tr>
+            <tr><td>ROA 5-Year Avg</td><td>${fmtPct(findMetric(m,'returnOnAverageAssets5YearAverage'))}</td></tr>
+            <tr><td>Return on Investment</td><td>${fmtPct(findMetric(m,'returnOnInvestmentMostRecentFiscalYear'))}</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <p class="section-label">Valuation Ratios</p>
+          <table>
+            <tr><td>P/E Ratio (TTM)</td><td>${fmtX(sd.pPerEBasicExcludingExtraordinaryItemsTTM)}</td></tr>
+            <tr><td>Forward P/E</td><td>${fmtX(findMetric(valuation,'pPerETrailing12MonthToForwardPE'))}</td></tr>
+            <tr><td>Price to Book</td><td>${fmtX(findMetric(valuation,'priceToBookMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Price to Sales</td><td>${fmtX(findMetric(valuation,'priceToSalesMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Price to Cash Flow</td><td>${fmtX(findMetric(valuation,'priceToCashFlowMostRecentFiscalYear'))}</td></tr>
+            <tr><td>EV / EBITDA</td><td>${fmtX(findMetric(valuation,'enterpriseValuePerEBITDAMostRecentFiscalYear'))}</td></tr>
+            <tr><td>EV / Revenue</td><td>${fmtX(findMetric(valuation,'enterpriseValuePerRevenueMostRecentFiscalYear'))}</td></tr>
+            <tr><td>PEG Ratio</td><td>${fmtX(findMetric(valuation,'pEGRatio'))}</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <p class="section-label">Financial Strength</p>
+          <table>
+            <tr><td>Current Ratio</td><td>${fmtX(findMetric(finStrength,'currentRatioMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Quick Ratio</td><td>${fmtX(findMetric(finStrength,'quickRatioMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Debt / Equity</td><td>${fmtX(findMetric(finStrength,'totalDebtPerTotalEquityMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Debt / Assets</td><td>${fmtX(findMetric(finStrength,'longTermDebtPerTotalAssetsMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Interest Coverage</td><td>${fmtX(findMetric(finStrength,'netInterestCoverageMostRecentFiscalYear'))}</td></tr>
+          </table>
+          <hr class="divider">
+          <p class="section-label" style="margin-top:.5rem">Efficiency</p>
+          <table>
+            <tr><td>Asset Turnover</td><td>${fmtX(findMetric(finStrength,'assetsTurnoverMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Inventory Turnover</td><td>${fmtX(findMetric(finStrength,'inventoryTurnoverMostRecentFiscalYear'))}</td></tr>
+            <tr><td>Receivables Turnover</td><td>${fmtX(findMetric(finStrength,'receivableTurnoverMostRecentFiscalYear'))}</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Growth Metrics -->
+    <div class="card">
+      <p class="section-label">Growth Metrics</p>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Revenue Growth (5Y)</div>
+          <div class="metric-value ${colorClass(findMetric(growth,'revenueGrowthRate5Year'))}">${fmtPct(findMetric(growth,'revenueGrowthRate5Year'), true)}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">EPS Growth (5Y)</div>
+          <div class="metric-value ${colorClass(findMetric(growth,'ePSGrowthRate5Year'))}">${fmtPct(findMetric(growth,'ePSGrowthRate5Year'), true)}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Dividend Growth (5Y)</div>
+          <div class="metric-value ${colorClass(findMetric(growth,'dividendGrowthRate5Year'))}">${fmtPct(findMetric(growth,'dividendGrowthRate5Year'), true)}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Book Value Growth (5Y)</div>
+          <div class="metric-value ${colorClass(findMetric(growth,'bookValuePerShareGrowthRate5Year'))}">${fmtPct(findMetric(growth,'bookValuePerShareGrowthRate5Year'), true)}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Capital Spending (5Y)</div>
+          <div class="metric-value ${colorClass(findMetric(growth,'capitalSpendingGrowthRate5Year'))}">${fmtPct(findMetric(growth,'capitalSpendingGrowthRate5Year'), true)}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">EPS Change (TTM)</div>
+          <div class="metric-value ${colorClass(findMetric(growth,'ePSChangePercentTTMOverTTM'))}">${fmtPct(findMetric(growth,'ePSChangePercentTTMOverTTM'), true)}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Per Share Data -->
+    <div class="card">
+      <p class="section-label">Per Share Data</p>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">EPS (Basic)</div>
+          <div class="metric-value">${fmt(findMetric(perShare,'ePSBasicMostRecentFiscalYear'))}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">EPS (Diluted)</div>
+          <div class="metric-value">${fmt(findMetric(perShare,'ePSDilutedMostRecentFiscalYear'))}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Cash/Share</div>
+          <div class="metric-value">${fmt(findMetric(perShare,'cashPerShare MostRecentFiscalYear'))}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Revenue/Share</div>
+          <div class="metric-value">${fmt(findMetric(perShare,'revenuePerShare MostRecentFiscalYear'))}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Dividend/Share</div>
+          <div class="metric-value">${fmt(findMetric(perShare,'dividendPerShare MostRecentFiscalYear'))}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Free Cash Flow/Share</div>
+          <div class="metric-value">${fmt(findMetric(perShare,'freeCashFlowPerShare MostRecentFiscalYear'))}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analyst Recommendations & Risk -->
+    <div class="row mb-15" style="align-items:flex-start">
+      <div class="col">
+        <div class="card">
+          <p class="section-label">Analyst Recommendations (${totalAnalysts} analysts)</p>
+          <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(0,0,0,0.08)">
+            <div style="font-size:18px;font-weight:600;color:#02552e">${analyst.ratingName || '—'}</div>
+            <div style="font-size:12px;color:#888780;margin-top:4px">Consensus Rating · Mean Score ${(recos.meanValue||0).toFixed(2)}</div>
+          </div>
+          ${analystRows.map(r => {
+            const pct = totalAnalysts > 0 ? (r.numberOfAnalysts / totalAnalysts * 100).toFixed(0) : 0;
+            return `<div class="analyst-row">
+              <span class="analyst-label">${r.ratingName}</span>
+              ${pctBar(pct, 100, r.colorCode)}
+              <span class="analyst-count" style="color:${r.colorCode}">${r.numberOfAnalysts}</span>
+            </div>`;
+          }).join('')}
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(0,0,0,0.08)">
+            <table>
+              <tr><td>Target Price (High)</td><td>${fmt(recos.targetPriceHigh)}</td></tr>
+              <tr><td>Target Price (Mean)</td><td>${fmt(recos.targetPriceMean)}</td></tr>
+              <tr><td>Target Price (Low)</td><td>${fmt(recos.targetPriceLow)}</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="col col-stack">
+        <div class="card">
+          <p class="section-label">Shareholding Pattern</p>
+          <table>
+            ${shCategories.map(cat => `<tr><td>${cat.category}</td><td>${fmtPct(cat.percentage)}</td></tr>`).join('')}
+            ${mfSh ? `<tr><td>Mutual Funds</td><td>${fmtPct(mfSh.percentage)}</td></tr>` : ''}
+          </table>
+          ${shHistory.length > 0 ? `
+          <hr class="divider">
+          <p class="section-label" style="margin-top:.5rem">Shareholding History</p>
+          <table style="font-size:12px">
+            <tr style="color:#888780"><td>Quarter</td>${shHistory[0]?.history?.slice(0,4).map(h => `<td style="text-align:right">${h.quarter}</td>`).join('')}</tr>
+            ${shHistory.slice(0,3).map(cat => `
+              <tr><td>${cat.category}</td>${cat.history?.slice(0,4).map(h => `<td style="text-align:right">${fmtPct(h.percentage)}</td>`).join('')}</tr>
+            `).join('')}
+          </table>` : ''}
+        </div>
+        <div class="card">
+          <p class="section-label">Risk Profile</p>
+          <table>
+            <tr><td>Risk Category</td><td><span class="badge ${(risk.categoryName||'').toLowerCase().includes('high') ? 'badge-sell' : (risk.categoryName||'').toLowerCase().includes('low') ? 'badge-buy' : 'badge-hold'}">${risk.categoryName || '—'}</span></td></tr>
+            <tr><td>Standard Deviation</td><td>${risk.stdDev || '—'}</td></tr>
+            <tr><td>Risk Score</td><td>${risk.riskValue || '—'}</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    ${peers.length ? `
+    <div class="card">
+      <p class="section-label">Peer Comparison</p>
+      <div style="overflow-x:auto">
+        <table class="peer-table" style="min-width:700px">
+          <thead>
+            <tr style="font-size:11px;color:#888780">
+              <td style="padding-bottom:8px;font-weight:500">Company</td>
+              <td style="padding-bottom:8px;font-weight:500;text-align:right">Price (₹)</td>
+              <td style="padding-bottom:8px;font-weight:500;text-align:right">Mkt Cap (Cr)</td>
+              <td style="padding-bottom:8px;font-weight:500;text-align:right">P/E</td>
+              <td style="padding-bottom:8px;font-weight:500;text-align:right">P/B</td>
+              <td style="padding-bottom:8px;font-weight:500;text-align:right">ROE (5Y)</td>
+              <td style="padding-bottom:8px;font-weight:500;text-align:right">Div Yield</td>
+              <td style="padding-bottom:8px;font-weight:500;text-align:right">Rating</td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="font-size:13px;background:rgba(24,95,165,0.05)">
+              <td class="peer-name" style="padding:8px 0">${data.companyName}</td>
+              <td style="text-align:right;color:#1a1a18;font-weight:600">${parseFloat(price).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+              <td style="text-align:right;color:#1a1a18">${parseFloat(sd.marketCap||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
+              <td style="text-align:right;color:#1a1a18">${parseFloat(sd.pPerEBasicExcludingExtraordinaryItemsTTM||0).toFixed(2)}</td>
+              <td style="text-align:right;color:#1a1a18">${parseFloat(findMetric(valuation,'priceToBookMostRecentFiscalYear')||0).toFixed(2)}</td>
+              <td style="text-align:right;color:#1a1a18">${fmtPct(findMetric(m,'returnOnAverageEquity5YearAverage'))}</td>
+              <td style="text-align:right;color:#1a1a18">${fmtPct(sd.currentDividendYieldCommonStockPrimaryIssueLTM)}</td>
+              <td style="text-align:right">${ratingBadge(sd.averageRating)}</td>
+            </tr>
+            ${peers.map(p => `
+            <tr style="font-size:13px">
+              <td style="padding:8px 0;color:#666">${p.companyName}</td>
+              <td style="text-align:right">${parseFloat(p.price||0).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+              <td style="text-align:right">${parseFloat(p.marketCap||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
+              <td style="text-align:right">${parseFloat(p.priceToEarningsValueRatio||0).toFixed(2)}</td>
+              <td style="text-align:right">${parseFloat(p.priceToBookValueRatio||0).toFixed(2)}</td>
+              <td style="text-align:right">${fmtPct(p.returnOnAverageEquity5YearAverage)}</td>
+              <td style="text-align:right">${fmtPct(p.dividendYield)}</td>
+              <td style="text-align:right">${ratingBadge(p.overallRating)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>` : ''}
+
+    ${dividends.length || splits.length || bonuses.length || boards.length ? `
+    <div class="card">
+      <p class="section-label">Corporate Actions</p>
+      <table>
+        ${dividends.map((d,i) => `<tr>
+          <td>${i===0?'Latest Dividend':i===1?'Prev. Dividend':'Dividend'}</td>
+          <td>₹${d.value}/share (${d.percentage}%) · ${d.interimOrFinal || 'Final'} · Ex-date: ${formatDate(d.xdDate || d.recordDate)}</td>
+        </tr>`).join('')}
+        ${splits.map(s => `<tr>
+          <td>Stock Split</td>
+          <td>₹${s.oldFaceValue} → ₹${s.newFaceValue} face value · ${formatDate(s.xsDate)}</td>
+        </tr>`).join('')}
+        ${bonuses.map(b => `<tr>
+          <td>Bonus</td>
+          <td>${b.ratio} · Ex-date: ${formatDate(b.xbDate)}</td>
+        </tr>`).join('')}
+        ${rights.map(r => `<tr>
+          <td>Rights Issue</td>
+          <td>${r.ratio} @ ₹${r.premium}/share · ${formatDate(r.xrDate)}</td>
+        </tr>`).join('')}
+        ${agms.map(a => `<tr>
+          <td>${a.purpose}</td>
+          <td>${formatDate(a.agmDate)}</td>
+        </tr>`).join('')}
+        ${boards.map(b => `<tr>
+          <td>Board Meeting</td>
+          <td>${formatDate(b.boardMeetDate)} · ${b.purpose}</td>
+        </tr>`).join('')}
+      </table>
+    </div>` : ''}
+
+    ${news.length ? `
+    <div class="card">
+      <p class="section-label">Recent News</p>
+      ${news.slice(0, 8).map(n => `
+      <div class="news-item">
+        <div class="news-headline">${n.headline}</div>
+        <div class="news-date">${formatDate(n.date)}</div>
+        ${n.summary ? `<div class="news-summary">${n.summary.substring(0, 150)}...</div>` : ''}
+      </div>`).join('')}
+    </div>` : ''}
+  `;
+
+  const dash = document.getElementById('dashboard');
+  dash.innerHTML = html;
+  dash.style.display = 'block';
+
+  // Initialize chart after DOM is updated
+  setTimeout(() => initChart(data), 100);
+}
+
+async function loadStock(stockName) {
+  const input = stockName || document.getElementById('stockInput').value.trim();
+  if (!input) return;
+
+  document.getElementById('stockInput').value = input;
+
+  const btn = document.getElementById('searchBtn');
+  const errorBox = document.getElementById('errorBox');
+  const loadingBox = document.getElementById('loadingBox');
+  const dash = document.getElementById('dashboard');
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  errorBox.style.display = 'none';
+  loadingBox.style.display = 'block';
+  dash.style.display = 'none';
+
+  try {
+    const data = await getStockDetailsData({ stock: input });
+    if (!data || !data.companyName) throw new Error('Invalid response from server');
+    render(data);
+  } catch (err) {
+    errorBox.textContent = `Failed to load stock data: ${err.message}. Make sure the API server is running at ${API_BASE_URL}.`;
+    errorBox.style.display = 'block';
+  } finally {
+    loadingBox.style.display = 'none';
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+  const searchBtn = document.getElementById('searchBtn');
+  const stockInput = document.getElementById('stockInput');
+  const onSearchClick = () => loadStock();
+  const onStockInputKeyDown = e => {
+    if (e.key === 'Enter') loadStock();
+  };
+
+  if (searchBtn) searchBtn.addEventListener('click', onSearchClick);
+  if (stockInput) stockInput.addEventListener('keydown', onStockInputKeyDown);
+
+  const params = new URLSearchParams(window.location.search);
+  const stockName = params.get('stockname');
+  if (stockName) {
+    loadStock(stockName);
+  }
+
+  const cleanup = () => {
+    if (searchBtn) searchBtn.removeEventListener('click', onSearchClick);
+    if (stockInput) stockInput.removeEventListener('keydown', onStockInputKeyDown);
+  };
+  return cleanup;
+}
+
