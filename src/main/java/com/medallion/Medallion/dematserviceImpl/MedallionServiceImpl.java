@@ -92,11 +92,11 @@ public class MedallionServiceImpl implements MedallionService {
 				companyentity.setIsinId(companyProfile.getIsinId());
 				companyentity.setMgIndustry(companyProfile.getMgIndustry());
 				List<OfficerDto> officers = companyProfile.getOfficers();
-				List<OfficerEntity> officeren = officers.stream().map(officer ->{
-				 return modelMapper.map(officers, OfficerEntity.class);
+				List<OfficerEntity> officeren = officers.stream().map(officer -> {
+					return modelMapper.map(officers, OfficerEntity.class);
 				}).collect(Collectors.toList());
 				companyentity.setOfficers(officeren);
-				List<PeerCompanyEntity> peerList = companyProfile.getPeerCompanyList().stream().map(peer ->{
+				List<PeerCompanyEntity> peerList = companyProfile.getPeerCompanyList().stream().map(peer -> {
 					return modelMapper.map(peer, PeerCompanyEntity.class);
 				}).collect(Collectors.toList());
 				companyentity.setPeerCompanyList(peerList);
@@ -110,19 +110,19 @@ public class MedallionServiceImpl implements MedallionService {
 				FinancialsDto financials = stockDto.getFinancials();
 				FinancialsEntity financialsEntity = modelMapper.map(financials, FinancialsEntity.class);
 				if (financialsEntity.getFinancials() != null) {
-				    for (FinancialStatementEntity stmt : financialsEntity.getFinancials()) {
-				        stmt.setFinancials(financialsEntity);
-				        if (stmt.getStockFinancials() != null) {
-				            for (FinancialCategoryEntity cat : stmt.getStockFinancials()) {
-				                cat.setFinancialStatement(stmt);
-				                if (cat.getEntries() != null) {
-				                    for (FinancialEntryEntity entry : cat.getEntries()) {
-				                        entry.setFinancialCategory(cat);
-				                    }
-				                }
-				            }
-				        }
-				    }
+					for (FinancialStatementEntity stmt : financialsEntity.getFinancials()) {
+						stmt.setFinancials(financialsEntity);
+						if (stmt.getStockFinancials() != null) {
+							for (FinancialCategoryEntity cat : stmt.getStockFinancials()) {
+								cat.setFinancialStatement(stmt);
+								if (cat.getEntries() != null) {
+									for (FinancialEntryEntity entry : cat.getEntries()) {
+										entry.setFinancialCategory(cat);
+									}
+								}
+							}
+						}
+					}
 				}
 				stockentity.setFinancials(financialsEntity);
 				KeyMetricsDto metrics = stockDto.getKeyMetrics();
@@ -174,8 +174,8 @@ public class MedallionServiceImpl implements MedallionService {
 	@Override
 	public DirectionalProbabilityDto getDirectionalProbability(StockRequest stockRequest) {
 		DataSetDto dataSetDto = null;
-		DatasetEntity dataset = dataSetRepository.findTopByStocknameAndCreatedDateLessThanEqualOrderByCreatedDateDesc(
-				stockRequest.getStock(), LocalDate.now());
+		DatasetEntity dataset = dataSetRepository
+				.findTopByStocknameAndPeriodOrderByCreatedDateDesc(stockRequest.getStock(), stockRequest.getPeriod());
 		if (dataset == null) {
 			dataSetDto = apiService.getHistoricalData(stockRequest.getStock(), stockRequest.getPeriod(), "default");
 			DatasetEntity datasetEntity = modelMapper.map(dataSetDto, DatasetEntity.class);
@@ -198,12 +198,12 @@ public class MedallionServiceImpl implements MedallionService {
 		result.setDataSetDto(dataSetDto);
 		return result;
 	}
-	
+
 	@Override
 	public DataSetDto getHistoricalPrice(String stockname) {
 		DataSetDto dataSetDto = null;
-		DatasetEntity dataset = dataSetRepository.findTopByStocknameAndCreatedDateLessThanEqualOrderByCreatedDateDesc(
-				stockname, LocalDate.now());
+		DatasetEntity dataset = dataSetRepository
+				.findTopByStocknameAndCreatedDateLessThanEqualOrderByCreatedDateDesc(stockname, LocalDate.now());
 		if (dataset == null) {
 			dataSetDto = apiService.getHistoricalData(stockname, "6m", "default");
 			DatasetEntity datasetEntity = modelMapper.map(dataSetDto, DatasetEntity.class);

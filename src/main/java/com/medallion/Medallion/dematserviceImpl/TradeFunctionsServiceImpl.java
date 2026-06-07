@@ -1,10 +1,15 @@
 package com.medallion.Medallion.dematserviceImpl;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.DoubleSummaryStatistics;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ForkJoinPool;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import com.medallion.Medallion.dematservice.TradeFunctionService;
@@ -18,11 +23,18 @@ import com.medallion.Medallion.validation.ValidateMedallion;
 @Service
 public class TradeFunctionsServiceImpl implements TradeFunctionService {
 
+	private static final int TRADING_DAYS_PER_YEAR = 252;
+	private static final double DELTA = 1.0 / TRADING_DAYS_PER_YEAR;
+
 	@Autowired
 	private MedallionAlgorithms medallionAlgorithms;
 
 	@Autowired
 	private ValidateMedallion validateMedallion;
+
+	@Autowired
+	@Qualifier("simulationPool")
+	private ForkJoinPool simulationPool; // injected dedicated pool
 
 	// ── Run simulations ──────────────────────────────────────────────────
 	private static final int PERCENT_MULTIPLIER = 100;
@@ -30,63 +42,103 @@ public class TradeFunctionsServiceImpl implements TradeFunctionService {
 	@Override
 	public DirectionalProbabilityDto calculateDirectionalProbability(List<Double> prices, VolumeData volumeData,
 			double currentPrice, int simulations) {
+		medallionAlgorithms.validatePrices(prices);
+		medallionAlgorithms.validateVolumeData(volumeData);
+		double annualVolatility = medallionAlgorithms.calculateVolatility(prices);
+		VolumeData computedVolume = medallionAlgorithms.calculateVolume(volumeData);
+		double volumeFactor = Math.min(computedVolume.getCurrVolume() / computedVolume.getAvgVolume(), 2.0);
+		double adjustedVolatility = annualVolatility * volumeFactor;
+		double sumLogReturns = 0;
+		for (int i = 1; i < prices.size(); i++) {
+			sumLogReturns += Math.log(prices.get(i) / prices.get(i - 1));
+		}
+		double avgDailyReturn = sumLogReturns / (prices.size() - 1);
+		double annualizedReturn = avgDailyReturn * TRADING_DAYS_PER_YEAR;
 		validateMedallion.validateInputs(prices, currentPrice, simulations);
-		SimulationResult result = runSimulations(prices, volumeData, currentPrice, simulations);
+		SimulationResult result = runSimulations(adjustedVolatility, currentPrice, annualizedReturn, simulations);
 		return buildDto(result, currentPrice, simulations);
 	}
 
 	@Override
 	public List<SimulationPathDto> generateMonteCarloPaths(List<Double> prices, VolumeData volumeData,
 			double currentPrice, int days, int simulations) {
-		List<SimulationPathDto> paths = new ArrayList<>();
-		for (int i = 0; i < simulations; i++) {
-			SimulationPathDto path = medallionAlgorithms.simulatePricePath(prices, volumeData, currentPrice, days);
-			paths.add(path);
+		try {
+			medallionAlgorithms.validatePrices(prices);
+			medallionAlgorithms.validateVolumeData(volumeData);
+			double annualVolatility = medallionAlgorithms.calculateVolatility(prices);
+			VolumeData computedVolume = medallionAlgorithms.calculateVolume(volumeData);
+			double volumeFactor = Math.min(computedVolume.getCurrVolume() / computedVolume.getAvgVolume(), 2.0);
+			double adjustedVolatility = annualVolatility * volumeFactor;
+			double sumLogReturns = 0;
+			for (int i = 1; i < prices.size(); i++) {
+				sumLogReturns += Math.log(prices.get(i) / prices.get(i - 1));
+			}
+			double avgDailyReturn = sumLogReturns / (prices.size() - 1);
+			double annualizedReturn = avgDailyReturn * TRADING_DAYS_PER_YEAR;
+			int batchSize = 1000;
+			List<SimulationPathDto> results = new ArrayList<>(simulations);
+			for (int start = 0; start < simulations; start += batchSize) {
+				int currentBatchSize = Math.min(batchSize, simulations - start);
+				List<SimulationPathDto> batchResults = simulationPool.submit(() -> IntStream
+						.range(0, currentBatchSize).parallel().mapToObj(i -> medallionAlgorithms
+								.simulatePricePathsMotecarlo(adjustedVolatility, currentPrice, days, annualizedReturn))
+						.collect(Collectors.toList())).get();
+				results.addAll(batchResults);
+			}
+			return results;
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new RuntimeException("Monte Carlo path generation interrupted", e);
+		} catch (ExecutionException e) {
+			throw new RuntimeException("Monte Carlo path generation failed", e.getCause());
 		}
-		return paths;
 	}
 
-	private SimulationResult runSimulations(List<Double> prices, VolumeData volumeData, double currentPrice,
+	private SimulationResult runSimulations(double adjustedVolatility, double currentPrice, double annualizedReturn,
 			int simulations) {
-
-		int bullishCount = 0;
-		int bearishCount = 0;
-		int neutralCount = 0;
-		double totalPrice = 0.0;
-		List<Double> finalPrices = new ArrayList<>();
-
-		for (int i = 0; i < simulations; i++) {
-			double simulatedPrice = medallionAlgorithms.getMedallionPrice(prices, volumeData, currentPrice);
-			totalPrice += simulatedPrice;
-			finalPrices.add(simulatedPrice);
-			if (simulatedPrice > currentPrice) {
-				bullishCount++;
-			} else if (simulatedPrice < currentPrice) {
-				bearishCount++;
-			} else {
-				neutralCount++;
+		try {
+			int batchSize = 1000;
+			int remaining = simulations;
+			List<Double> finalPrices = new ArrayList<>(simulations);
+			while (remaining > 0) {
+				int currentBatchSize = Math.min(batchSize, remaining);
+				List<Double> batchResults = simulationPool.submit(() -> IntStream
+						.range(0, currentBatchSize).parallel().mapToDouble(i -> medallionAlgorithms
+								.getMedallionPrices(adjustedVolatility, currentPrice, annualizedReturn))
+						.boxed().collect(Collectors.toList())).get();
+				finalPrices.addAll(batchResults);
+				remaining -= currentBatchSize;
 			}
+			finalPrices.sort(Double::compareTo);
+			return buildSimulationResult(finalPrices, currentPrice);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new RuntimeException("Simulation interrupted", e);
+		} catch (ExecutionException e) {
+			throw new RuntimeException("Simulation failed", e.getCause());
 		}
-		Collections.sort(finalPrices);
-		double medianPrice = finalPrices.get(finalPrices.size() / 2);
-		double minPrice = finalPrices.get(0);
-		double maxPrice = finalPrices.get(finalPrices.size() - 1);
-		double spread = maxPrice - minPrice;
-		/*
-		 * Measures simulation agreement.
-		 *
-		 * Lower spread relative to median means higher confidence.
-		 */
+	}
+
+	private SimulationResult buildSimulationResult(List<Double> sortedPrices, double currentPrice) {
+		// Aggregate stats from already-sorted list
+		long bullishCount = sortedPrices.stream().filter(p -> p > currentPrice).count();
+		long bearishCount = sortedPrices.stream().filter(p -> p < currentPrice).count();
+		long neutralCount = sortedPrices.stream().filter(p -> p == currentPrice).count();
+
+		DoubleSummaryStatistics stats = sortedPrices.stream().mapToDouble(Double::doubleValue).summaryStatistics();
+
+		double medianPrice = sortedPrices.get(sortedPrices.size() / 2);
+		double spread = stats.getMax() - stats.getMin();
 		double consistency = 1.0 - (spread / medianPrice);
 
 		SimulationResult result = new SimulationResult();
-		result.setBearishCount(bearishCount);
-		result.setBullishCount(bullishCount);
-		result.setTotalPrice(totalPrice);
-		result.setNeutralCount(neutralCount);
+		result.setBullishCount((int) bullishCount);
+		result.setBearishCount((int) bearishCount);
+		result.setNeutralCount((int) neutralCount);
+		result.setTotalPrice(stats.getSum());
 		result.setMedianPrice(medianPrice);
-		result.setMinPrice(minPrice);
-		result.setMaxPrice(maxPrice);
+		result.setMinPrice(stats.getMin());
+		result.setMaxPrice(stats.getMax());
 		result.setSpread(spread);
 		result.setConsistency(consistency);
 		return result;

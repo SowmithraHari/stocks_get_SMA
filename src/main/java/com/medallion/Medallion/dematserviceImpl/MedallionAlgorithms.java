@@ -2,9 +2,12 @@ package com.medallion.Medallion.dematserviceImpl;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +24,7 @@ public class MedallionAlgorithms {
 	private static final int TRADING_DAYS_PER_YEAR = 252;
 	private static final double DELTA = 1.0 / TRADING_DAYS_PER_YEAR;
 	private final Random random;
+	private static final double SQRT_DELTA = Math.sqrt(DELTA);
 
 	public MedallionAlgorithms() {
 		this.random = new Random();
@@ -63,7 +67,30 @@ public class MedallionAlgorithms {
 			double totalLogReturn = Math.log(priceArray[tradingDays - 1] / priceArray[0]);
 			double annualizedReturn = (totalLogReturn / tradingDays) * TRADING_DAYS_PER_YEAR;
 			// GBM: S(t+Δ) = S(t) * exp((μ - σ²/2)Δ + σ√Δ * Z)
-			double z = random.nextGaussian();
+			double z = ThreadLocalRandom.current().nextGaussian();
+			double exponent = (annualizedReturn - 0.5 * adjVolatility * adjVolatility) * DELTA
+					+ adjVolatility * Math.sqrt(DELTA) * z;
+
+			return currentPrice * Math.exp(exponent);
+		} catch (IllegalArgumentException | MedallionPricingException e) {
+			throw e;
+		} catch (Exception e) {
+			logger.error("Unexpected error computing Medallion price for currentPrice={}", currentPrice, e);
+			throw new MedallionPricingException("Price computation failed unexpectedly", e);
+		}
+	}
+
+	public double getMedallionPrices(double adjVolatility, double currentPrice, double annualizedReturn) {
+		if (currentPrice <= 0) {
+			throw new IllegalArgumentException("currentPrice must be positive, got: " + currentPrice);
+		}
+		try {
+			// Annualized volatility from 6-month price history
+			// double adjVolatility = annualVolatility * (computedVolume.getCurrVolume() /
+			// computedVolume.getAvgVolume());
+			// Expected annualized return from log price ratio
+			// GBM: S(t+Δ) = S(t) * exp((μ - σ²/2)Δ + σ√Δ * Z)
+			double z = ThreadLocalRandom.current().nextGaussian();
 			double exponent = (annualizedReturn - 0.5 * adjVolatility * adjVolatility) * DELTA
 					+ adjVolatility * Math.sqrt(DELTA) * z;
 
@@ -190,7 +217,7 @@ public class MedallionAlgorithms {
 		// Z ~ N(0,1) standard normal random variable
 		for (int i = 0; i < days; i++) {
 			// Draw a standard normal random variable for this time step
-			double z = random.nextGaussian();
+			double z = ThreadLocalRandom.current().nextGaussian();
 			// Compute the GBM exponent: drift term + diffusion term
 			// The -0.5σ² adjustment (Itô correction) converts from log-normal to real-world
 			// drift
@@ -208,14 +235,36 @@ public class MedallionAlgorithms {
 		return dto;
 	}
 
-	private void validatePrices(List<Double> prices) {
+	public SimulationPathDto simulatePricePathsMotecarlo(double adjustedVolatility, double currentPrice, int days,
+			double annualizedReturn) {
+		if (days <= 0) {
+			throw new IllegalArgumentException("days must be positive");
+		}
+		double[] simulatedPrices = new double[days];
+		double simulatedPrice = currentPrice;
+		for (int i = 0; i < days; i++) {
+			double z = ThreadLocalRandom.current().nextGaussian();
+			double exponent = (annualizedReturn - 0.5 * adjustedVolatility * adjustedVolatility) * DELTA
+					+ adjustedVolatility * SQRT_DELTA * z;
+			simulatedPrice *= Math.exp(exponent);
+			simulatedPrices[i] = simulatedPrice;
+		}
+		List<Double> priceList = Arrays.stream(simulatedPrices).boxed().collect(Collectors.toList());
+		SimulationPathDto dto = new SimulationPathDto();
+		dto.setPrices(priceList);
+		dto.setFinalPrice(simulatedPrice);
+		dto.setBullish(simulatedPrice > currentPrice);
+		return dto;
+	}
+
+	public void validatePrices(List<Double> prices) {
 		if (prices == null || prices.size() < 2) {
 			throw new IllegalArgumentException(
 					"prices must contain at least 2 entries, got: " + (prices == null ? "null" : prices.size()));
 		}
 	}
 
-	private void validateVolumeData(VolumeData volumeData) {
+	public void validateVolumeData(VolumeData volumeData) {
 		if (volumeData == null) {
 			throw new IllegalArgumentException("volumeData must not be null");
 		}

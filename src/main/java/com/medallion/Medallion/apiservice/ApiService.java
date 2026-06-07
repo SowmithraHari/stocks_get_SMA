@@ -64,7 +64,7 @@ public class ApiService {
 				+ filter;
 		ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
 		String data = response.getBody();
-		return apiResponses.formDataSet(data);
+		return apiResponses.formDataSet(data,period);
 	}
 
 	public String getIpoData() {

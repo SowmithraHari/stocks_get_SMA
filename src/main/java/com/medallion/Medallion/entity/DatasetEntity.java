@@ -33,6 +33,16 @@ public class DatasetEntity {
 	private DMA50Enitity dma50;
 	
 	private String stockname;
+	
+	private String period;
+
+	public String getPeriod() {
+		return period;
+	}
+
+	public void setPeriod(String period) {
+		this.period = period;
+	}
 
 	public String getStockname() {
 		return stockname;

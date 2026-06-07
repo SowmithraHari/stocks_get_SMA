@@ -14,4 +14,10 @@ public interface DataSetRepository extends JpaRepository<DatasetEntity, Integer>
 
 	public DatasetEntity findTopByStocknameAndCreatedDateLessThanEqualOrderByCreatedDateDesc(String stock,
 			LocalDate createdDate);
+	
+	public DatasetEntity findTopByStocknameOrderByCreatedDateDesc(String stocks);
+	
+	public DatasetEntity findTopByStocknameAndPeriodOrderByCreatedDateDesc(String stocks,String period);
+	
+	
 }

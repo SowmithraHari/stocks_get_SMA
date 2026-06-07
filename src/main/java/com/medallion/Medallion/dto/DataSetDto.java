@@ -11,9 +11,21 @@ public class DataSetDto {
 	private DMA200Dto dma200;
 
 	private DMA50Dto dma50;
+	
+	private String period;
 
 	private LocalDate createdDate;
 	private String stockname;
+	
+	
+
+	public String getPeriod() {
+		return period;
+	}
+
+	public void setPeriod(String period) {
+		this.period = period;
+	}
 
 	public String getStockname() {
 		return stockname;

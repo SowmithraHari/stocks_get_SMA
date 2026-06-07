@@ -755,7 +755,7 @@ public class ApiResponses {
 		return responseDto;
 	}
 
-	public DataSetDto formDataSet(String data) {
+	public DataSetDto formDataSet(String data,String period) {
 		if (data == null || data.isEmpty()) {
 			throw new RuntimeException("empty response");
 		}
@@ -764,6 +764,7 @@ public class ApiResponses {
 		dataSetDto.setVolumeData(formVolumeResponse(data));
 		dataSetDto.setDma200(formDma200Response(data));
 		dataSetDto.setDma50(formDma50Response(data));
+		dataSetDto.setPeriod(period);
 		return dataSetDto;
 	}
 
